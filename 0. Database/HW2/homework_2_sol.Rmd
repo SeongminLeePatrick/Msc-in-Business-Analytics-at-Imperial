@@ -1,0 +1,135 @@
+---
+title: "Homework 2 solutions"
+author: "Piotr Migdał"
+output: html_notebook
+---
+
+
+```{r}
+library(RPostgreSQL)
+password <- .rs.askForPassword("Your database password.")
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "world",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = password)
+remove(password)
+```
+
+## 1.sql
+
+Show the 3 biggest countries (by their population) on the least populous continent (except for Antarctica).
+(Comment: please don’t hardcode ‘Oceania’ ;).)
+
+```{sql, connection=con}
+SELECT
+  name,
+  surfacearea,
+  population
+FROM country
+WHERE continent IN (
+  SELECT continent
+  FROM country
+  WHERE continent != 'Antarctica'
+  GROUP BY continent
+  ORDER BY SUM(population) ASC
+  LIMIT 1)
+ORDER BY population DESC
+LIMIT 3;
+```
+
+## 2.sql
+
+Show the 5 most most popular languages (by the total number of people speaking them).
+
+```{sql, connection=con}
+SELECT
+  language,
+  SUM(percentage * population) AS speakers
+FROM countrylanguage
+INNER JOIN country ON countrylanguage.countrycode = country.code
+GROUP BY language
+ORDER BY speakers DESC
+LIMIT 5;
+```
+
+## 3.sql
+
+Show all countries with at least 3 official languages, order them by their surface area.
+
+```{sql, connection=con}
+SELECT
+  name,
+  surfacearea
+FROM country
+WHERE code IN
+  (SELECT countrycode
+  FROM countrylanguage
+  WHERE isofficial
+  GROUP BY countrycode
+  HAVING COUNT(*) >= 3)
+ORDER BY surfacearea DESC;
+```
+
+## 4.sql
+
+For the 20 oldest countries (by indepyear), show the difference between life expectancy in each country and the continental average (call it life_exp_diff).
+
+```{sql, connection=con}
+SELECT
+  name,
+  lifeexpectancy,
+  lifeexpectancy - (AVG(lifeexpectancy) OVER (PARTITION BY continent))
+    AS life_exp_diff,
+  indepyear
+FROM country
+ORDER BY indepyear
+LIMIT 20;
+```
+
+## 5.sql
+
+Show the 20 biggest cities in the United States along with their rank in the state (with respect to their population) and percent of the city population in a state (call it: perc_pop_state).
+(Comment: note that this database does not contain all municipalities. Restrict your population count to this dataset.)
+
+```{sql, connection=con}
+SELECT *
+FROM
+  (SELECT
+    name,
+    population,
+    RANK() OVER (PARTITION BY district ORDER BY population DESC) AS rank,
+    100. * population / SUM(population) OVER (PARTITION BY district) AS perc_pop_state
+  FROM city
+  WHERE countrycode = 'USA') AS x
+ORDER BY population DESC
+LIMIT 20;
+```
+
+## 6.sql
+
+For the 5 most populous countries (call this column: country), show the 3 most populous cites (call this column: city) per country. Order cities by their population.
+
+```{sql, connection=con}
+SELECT
+  subquery.name AS city,
+  country.name AS country,
+  subquery.population,
+  subquery.rank
+FROM
+  (SELECT
+    city.name,
+    countrycode,
+    population,
+    RANK() OVER (PARTITION BY countrycode ORDER BY population DESC)
+  FROM city
+  WHERE countrycode in
+    (SELECT code
+    FROM country
+    ORDER BY population DESC
+    LIMIT 5)
+  ) AS subquery
+INNER JOIN country
+ON subquery.countrycode=country.code
+WHERE rank<=3
+ORDER BY population DESC
+```

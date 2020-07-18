@@ -1,0 +1,118 @@
+---
+title: "SVM Breast Cancer R Notebook"
+output: html_notebook
+---
+Here we illustrate an application of SVMs on the breast cancer data-set from the ML Benchmark library. We want to predict the cancer type (Malignant/Benign) and we show that model selection using cross validation helps in reducing prediction error on the test set. The various parts refer to the parts of an assignment question.
+```{r}
+set.seed(1000)
+library("mlbench")
+library(e1071)  # The library with the SVM functionality
+data(BreastCancer) #699 observations on 10 variables (including the class malignant / benign)
+```
+### Part (a)
+
+```{r}
+head(BreastCancer)
+```
+Let's remove the Id column which is simply a data-point ID and has no information regarding outcome.
+```{r}
+BC = subset(BreastCancer, select=-Id)  # removing the Id column 
+dim(BC)
+```
+Let's remove rows with NAs
+```{r}
+BC = BC[complete.cases(BC),]
+dim(BC)
+summary(BC)
+```
+We have removed 699 - 683 = 16 rows. This should be fine. If too many rows had 1 or more NAs then we would need a more sophisticated approach to handling NAs. (We're also implicitly assuming that the fact that a row has an NA doesn't tell us anything about the tumour class (malignant or benign) for that row.)
+
+One should generally do a little more EDA before moving on but ... I'll move on anyway. (Note, however, that most of the independnet variables are in fact factors or ordered factors so creating box-plots, pairwise scatterplots are not as informative (or informative at all in some cases) as they would be if the independent variables were numerical.)
+
+### Part (b)
+Let's create a traning and test set now.
+```{r}
+testindex = sample(nrow(BC),size=nrow(BC)/4)
+testset = BC[testindex,]
+trainset = BC[-testindex,]
+```
+Now let's fit an SVM with a linear kernel. (Note that in ISLR they prefer to call this a **support vector classifier**). I prefer to call it an SVM with a linear kernel! 
+
+```{r}
+tune.out = tune(svm,Class~.,data=trainset,kernel="linear",ranges=list(cost=c(0.001, 0.01, 0.1, 1,5,10,100)))
+summary(tune.out)   # can easily access the cross-validation errors for each of these models using the summary() command:
+```
+We see that cost=0.1 results in the lowest cross-validation error rate. The tune() function stores the best model obtained, which can be accessed as follows:
+```{r}
+Best_Linear_Mod = tune.out$best.model
+summary(Best_Linear_Mod)
+```
+The **predict()** function can be used to predict the class label on the test observations. Here we use the best model obtained through cross-validation in order to make predictions. 
+```{r}
+ypred = predict(Best_Linear_Mod,testset[,-10])
+LinearTable = table(predict=ypred, truth=testset[,10])
+LinearTable
+Linear_SVM_SuccessRate = (LinearTable[1,1]+LinearTable[2,2])/sum(LinearTable)
+cat("\n Success rate of tuned linear SVM on test set is",100*Linear_SVM_SuccessRate,"%\n")
+```
+
+
+### Part (c)
+Now let's fit a polynomial kernel of degree 2
+```{r}
+tune.out = tune(svm,Class~.,data=trainset,kernel="polynomial",degree=2,ranges=list(cost=c(0.1,1,10,50),gamma=c(0.005,0.05,0.5,1,2)))
+summary(tune.out)   # can easily access the cross-validation errors for each of these models using the summary() command:
+```
+We see that cost=10 and gamma = 0.05 results in the lowest cross-validation error rate. The tune() function stores the best model obtained, which can be accessed as follows:
+```{r}
+Best_Quadratic_Mod = tune.out$best.model
+summary(Best_Quadratic_Mod)
+```
+Now use the predict() function to predict the class label on the test observations. Here we use the best model obtained through cross-validation in order to make predictions. 
+```{r}
+ypred = predict(Best_Quadratic_Mod,testset[,-10])
+QuadTable = table(predict=ypred, truth=testset[,10])
+QuadTable
+Quad_SVM_SuccessRate = (QuadTable[1,1]+QuadTable[2,2])/sum(QuadTable)
+cat("\n Success rate of tuned linear SVM on test set is",100*Quad_SVM_SuccessRate,"%\n")
+```
+### Part (d)
+Now let's fit an SVM with a cubic kernel
+```{r}
+tune.out = tune(svm,Class~.,data=trainset,kernel="polynomial",degree=3,ranges=list(cost=c(1,10,50,200),gamma=c(0.005,0.05,0.5,1,2)))
+summary(tune.out)   # can easily access the cross-validation errors for each of these models using the summary() command:
+```
+We see that cost=50 and gamma = 0.05 results in the lowest cross-validation error rate. The tune() function stores the best model obtained, which can be accessed as follows:
+```{r}
+Best_Cubic_Mod = tune.out$best.model
+summary(Best_Cubic_Mod)
+```
+Now use the predict() function to predict the class label on the test observations. Here we use the best model obtained through cross-validation in order to make predictions. 
+```{r}
+ypred = predict(Best_Cubic_Mod,testset[,-10])
+CubicTable = table(predict=ypred, truth=testset[,10])
+CubicTable
+Cubic_SVM_SuccessRate = (CubicTable[1,1]+CubicTable[2,2])/sum(CubicTable)
+cat("\n Success rate of tuned linear SVM on test set is",100*Cubic_SVM_SuccessRate,"%\n")
+```
+### Part (e)
+Now let's fit an SVM with a Gaussian kernel model
+```{r}
+tune.out = tune(svm,Class~.,data=trainset,kernel="radial",ranges=list(cost=c(.01,1,10,50),gamma=c(0.005,0.05,0.5,1,2)))
+summary(tune.out)   # can easily access the cross-validation errors for each of these models using the summary() command:
+```
+We see that cost=1 and gamma = 0.05 results in the lowest cross-validation error rate. The tune() function stores the best model obtained, which can be accessed as follows:
+```{r}
+Best_Gaussian_Mod = tune.out$best.model
+summary(Best_Gaussian_Mod)
+```
+Now use the predict() function to predict the class label on the test observations. Here we use the best model obtained through cross-validation in order to make predictions. 
+```{r}
+ypred = predict(Best_Gaussian_Mod,testset[,-10])
+GaussianTable = table(predict=ypred, truth=testset[,10])
+GaussianTable
+Gaussian_SVM_SuccessRate = (GaussianTable[1,1]+GaussianTable[2,2])/sum(GaussianTable)
+cat("\n Success rate of tuned linear SVM on test set is",100*Gaussian_SVM_SuccessRate,"%\n")
+```
+The Gaussian kernel performs best but all kernels seem to do well and the differences in performance could easily be down to randomization of the training / test set and due to not considering sufficiently fine grids for selection of C and gamma (where appropriate) via cross-validation.
+

@@ -1,0 +1,303 @@
+---
+title: "Class 3 - part B"
+author: "Piotr Migdał"
+output: html_notebook
+---
+
+We will work with [Composition of Foods Raw, Processed, Prepared USDA National Nutrient Database for Standard Reference](https://catalog.data.gov/dataset/composition-of-foods-raw-processed-prepared-usda-national-nutrient-database-for-standard-r). See [here](https://ndb.nal.usda.gov/ndb/nutrients/index) for an interactive search.
+
+Before you start:
+
+* download `data/usda_utf8.sql` from the Materials
+* in pgAdmin, create a new database, `nutrients`
+* select it and open PSQL console (in Plugins or main menu, in pgAdmin 3)
+* write `\i your_path/to/usda_utf8.sql` to import it and press Enter
+* write `\q` and press Enter to quit the console
+
+Now connect to this database:
+
+```{r}
+library(RPostgreSQL)
+password <- .rs.askForPassword("Your database password.")
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "Nutrition",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = password)
+remove(password)
+```
+
+# Exploring 
+
+Neither tables nor columns are named in a clear fashion. We need to explore what's there.
+
+Remember to use `LIMIT` so we don't get too many results.
+
+```{sql, connection=con}
+SELECT * FROM nut_data LIMIT 5;
+```
+
+```{sql, connection=con}
+SELECT * FROM weight LIMIT 10;
+```
+
+```{sql, connection=con}
+SELECT * FROM weight 
+WHERE msre_desc = 'oz'
+LIMIT 10;
+```
+
+
+```{sql, connection=con}
+SELECT * FROM fd_group LIMIT 15;
+```
+
+
+```{sql, connection=con}
+SELECT * FROM datsrcln LIMIT 5;
+```
+
+```{sql, connection=con}
+SELECT * FROM deriv_cd LIMIT 5;
+```
+
+```{sql, connection=con}
+SELECT * FROM food_des LIMIT 10;
+```
+
+```{sql, connection=con}
+SELECT * FROM footnote LIMIT 5;
+```
+
+```{sql, connection=con}
+SELECT * FROM nut_data LIMIT 10;
+```
+
+```{sql, connection=con}
+SELECT * FROM nutr_def LIMIT 5;
+```
+
+
+```{sql, connection=con}
+SELECT * FROM src_cd LIMIT 5;
+```
+
+# Example
+
+Show 10 products with the highest protein content.
+Show also their food groups and their protein ranks withing thier group.
+
+```{sql, connection=con}
+SELECT
+  *
+FROM food_des
+NATURAL INNER JOIN fd_group
+ORDER BY long_desc
+LIMIT 10;
+```
+
+```{sql, connection=con}
+SELECT
+  long_desc,
+  nutr_val,
+  units,
+  nutrdesc,
+  fddrp_desc,
+  RANK() OVER (PARTITION BY fddrp_desc ORDER BY nutr_val DESC)
+FROM food_des
+INNER JOIN nut_data ON food_des.ndb_no = nut_data.ndb_no
+NATURAL INNER JOIN nutr_def
+NATURAL INNER JOIN fd_group
+WHERE  nutrdesc LIKE 'Protein%'
+ORDER BY nutr_val DESC
+LIMIT 10;
+```
+
+* show 10 foods with the highest protein content
+
+```{sql, connection=con}
+SELECT
+  long_desc,
+  msre_desc
+FROM food_des
+NATURAL INNER JOIN weight
+NATURAL INNER JOIN fd_group
+WHERE  long_desc LIKE '%beer%' AND fddrp_desc = 'Beverages';
+```
+
+```{sql, connection=con}
+SELECT
+  msre_desc,
+  COUNT(*) AS count
+FROM food_des
+NATURAL INNER JOIN weight
+NATURAL INNER JOIN fd_group
+WHERE  long_desc LIKE '%beer%' AND fddrp_desc = 'Beverages'
+GROUP BY msre_desc
+ORDER BY count DESC;
+```
+
+* which measure is the most common for beer?
+* how to relate various measures to grams?
+
+```{sql, connection=con}
+SELECT
+  msre_desc,
+  AVG(gm_wgt / amount) AS g,
+  MIN(gm_wgt / amount) AS g_min,
+  MAX(gm_wgt / amount) AS g_max,
+  COUNT(*) as count
+FROM weight
+GROUP BY msre_desc
+ORDER BY count DESC;
+```
+
+* show number of products containing alcohol, by food group
+
+```{sql, connection=con}
+SELECT *
+FROM nutr_def
+WHERE nutrdesc LIKE '%Alcohol%'
+LIMIT 10;
+```
+
+```{sql, connection=con}
+SELECT
+  long_desc,
+  nutr_val,
+  units,
+  nutrdesc,
+  fddrp_desc
+FROM food_des
+NATURAL INNER JOIN nut_data 
+NATURAL INNER JOIN nutr_def
+NATURAL INNER JOIN fd_group
+WHERE tagname = 'ALC' AND nutr_val > 0
+ORDER BY nutr_val
+LIMIT 10;
+```
+
+```{sql, connection=con}
+SELECT
+  fddrp_desc,
+  COUNT(*)
+FROM food_des
+NATURAL INNER JOIN nut_data 
+NATURAL INNER JOIN nutr_def
+NATURAL INNER JOIN fd_group
+WHERE tagname = 'ALC' AND nutr_val > 0
+GROUP BY fddrp_desc;
+```
+
+* show foods with their calcium content and compare it to the average of their food group
+
+```{sql, connection=con}
+SELECT *
+FROM nutr_def
+WHERE nutrdesc LIKE '%Calcium%'
+LIMIT 10;
+```
+
+```{sql, connection=con}
+SELECT
+  long_desc,
+  nutr_val as calcium_mg,
+  AVG(nutr_val) OVER (PARTITION BY fddrp_desc),
+  fddrp_desc
+FROM food_des
+NATURAL INNER JOIN nut_data 
+NATURAL INNER JOIN nutr_def
+NATURAL INNER JOIN fd_group
+WHERE tagname = 'CA'
+ORDER BY calcium_mg DESC;
+```
+
+* for each food group show a product with the highest sugar content
+
+```{sql, connection=con}
+SELECT *
+FROM nutr_def
+WHERE nutrdesc LIKE '%Sugar%'
+LIMIT 10;
+```
+
+```{sql, connection=con}
+WITH ranked_by_sugar AS (
+  SELECT
+    long_desc,
+    nutr_val as sugar,
+    RANK() OVER (PARTITION BY fddrp_desc ORDER BY nutr_val DESC) as rank,
+    fddrp_desc
+  FROM food_des
+  NATURAL INNER JOIN nut_data 
+  NATURAL INNER JOIN nutr_def
+  NATURAL INNER JOIN fd_group
+  WHERE tagname = 'CA')
+SELECT
+  long_desc,
+  sugar,
+  fddrp_desc
+FROM ranked_by_sugar
+WHERE rank = 1
+ORDER BY sugar DESC;
+```
+
+* for the 5 most common food groups show 3 most common measure names (e.g. cups)
+
+```{sql, connection=con}
+WITH common_food_groups AS (
+  SELECT
+    fddrp_desc,
+    COUNT(*) as counts
+  FROM food_des
+  NATURAL INNER JOIN fd_group
+  GROUP BY fddrp_desc
+  ORDER BY counts
+  LIMIT 5
+),
+counted_measures AS (
+  SELECT
+    fddrp_desc,
+    msre_desc,
+    COUNT(*) AS counts
+  FROM food_des
+  NATURAL INNER JOIN weight
+  NATURAL INNER JOIN fd_group
+  WHERE fddrp_desc IN (SELECT fddrp_desc FROM common_food_groups)
+  GROUP BY fddrp_desc, msre_desc
+),
+ranked AS (
+  SELECT
+    fddrp_desc,
+    msre_desc,
+    counts,
+    RANK() OVER (PARTITION BY fddrp_desc ORDER BY counts DESC) AS rank_by_food_group
+  FROM counted_measures)
+SELECT *
+FROM ranked
+WHERE rank_by_food_group <= 3
+ORDER BY counts DESC;
+```
+
+* create a view with food name (long_desc), its food group and possible servings
+
+```{sql, connection=con}
+CREATE VIEW food AS (
+  SELECT
+    long_desc AS name,
+    amount AS serving_amount,
+    msre_desc AS serving_unit,
+    fddrp_desc AS food_group
+  FROM food_des
+  NATURAL INNER JOIN weight
+  NATURAL INNER JOIN fd_group
+  ORDER BY name
+);
+
+SELECT * FROM food;
+```
+
+# Extra exercises
+
+* create a few views for the end user - covering the most important information, with nicer table and column names
+* food contains ash? invesitage!
+* what is the strangest food or component you've found? ;)

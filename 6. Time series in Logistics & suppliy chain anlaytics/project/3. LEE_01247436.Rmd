@@ -1,0 +1,582 @@
+---
+title: "LEE_CID: 01247436"
+author: "Seongmin Lee"
+output: html_document
+---
+
+```{r warning=FALSE, message = FALSE, echo = FALSE}
+setwd("~/00. Spring/Logistics & Supply Chain Analytics/project/data")
+
+if (!require("forecast")) install.packages("forecast")
+if (!require("tseries")) install.packages("tseries")
+library(forecast)
+library(tseries)
+library(ggplot2)
+
+data <- read.csv('2. datatable.csv', row.names = 1)
+```
+
+
+## Train, Test dataset split
+
+To find out the best models to predict the lettuce demand, the dataset is divided into two parts, the testset and the trainset. The testset was allocated with the fourteen datapoints in that we are pursuing the fourteen days forecast. And the rest of the data point turned into the trainset. In addition, missing values labled as '0' and outliers at the beginning have been removed to make the dataset unbiased in a continuous time series scale.
+
+```{r}
+# New.York.1..ID.12631
+data1 <- data[data$New.York.1..ID.12631. > 0, 2]
+ny1 <- ts(data1, frequency = 7)
+ny1_train <- ts(data1[1:(length(ny1) - 14)], frequency = 7)
+ny1_test <- ts(data1[(length(ny1) - 13):length(ny1)], frequency = 7, start = c(13, 6))
+
+#California.1..ID.46673
+data2 <- data[data$California.1..ID.46673. > 0, 3]
+ca1 <- ts(data2, frequency = 7)
+ca1_train <- ts(data2[1:(length(ca1) - 14)], frequency = 7)
+ca1_test <- ts(data2[(length(ca1) - 13):length(ca1)], frequency = 7, start = c(13, 6))
+
+#New.York.2..ID.20974
+data3 <- data[16:nrow(data), 4]
+ny2 <- ts(data3, frequency = 7)
+ny2_train <- ts(data3[1:(length(ny2) - 14)], frequency = 7)
+ny2_test <- ts(data3[(length(ny2) - 13):length(ny2)], frequency = 7, start = c(11, 5))
+
+#California.2..ID.4904
+data4 <- data[9:nrow(data), 5]
+ca2 <- ts(data4, frequency = 7)
+ca2_train <- ts(data4[1:(length(ca2) - 14)], frequency = 7)
+ca2_test <- ts(data4[(length(ca2) - 13):length(ca2)], frequency = 7, start = c(12, 5))
+```
+
+
+# 1. Store in New York 1 (ID: 12631)
+
+First of all, we need to observe the time series data by visualising in graphs as below. Based on the top line chart depicting the ny1_12631 trainset, it is hard to point out that there is certain trend or seasonal significance. 
+
+```{r}
+ny1_train %>% stl(s.window = "period") %>% autoplot
+```
+
+## Q1. Holt-Winters Analysis
+To perform the Holt-winters analysis, we need to use both $HoltWinters$ and $ets$ functions to find out a form of the systematic components by minimising the forecast errors. As a result of $ets$ on the ny1 trainset, We conclude the model of $ETS(M, N, M)$, which indicates the multiplicative error type, no trend, and the multiplicative seasonal type. And the Holt-winter model have exponential smoothing with trend and additive seasonal component. The Holt-winters fitted values and ETS fitted values are colored as red and blue, repectively. 
+
+```{r}
+ny1_train_ets <- ets(ny1_train, model = "ZZZ") #ETS(M,N,M)
+ny1_train_HW <- HoltWinters(ny1_train)
+
+plot(ny1_train_HW, main = "NY1_12631 fitted")
+lines(fitted(ny1_train_ets), col = "blue", lty = 2)
+legend("bottomright",c("True value", "HW fitted", "ETS fitted"), lty = 1, col = c("black","red", "blue"))
+```
+
+When it comes to the forecast in the fourteen days, both of the models seems very similiar on the plot. However, the predictions are somewhat different from the the true values. To be specific, the forecast did not represent the peak seasons well.
+
+```{r}
+ny1_train_ets_fcst <- forecast(ny1_train_ets, h = 14)
+ny1_train_HW_fcst <- forecast(ny1_train_HW, h = 14)
+
+plot(ny1_train_HW_fcst, main = "NY1_12631 Forecast")
+lines(ny1)
+lines(ny1_train_ets_fcst$mean, col = "red")
+legend("bottomright",c("HW FCST", "ETS FCST"), lty = 2, col = c("blue","red"))
+```
+
+## Q2. ARIMA Analysis
+
+Based on the figure of ACF and PACF, we can assume the moving avarge1(MA1) as a candicate model because the the values at the PACF chart decreases exponentially, and there is one spike at one in the ACF graph as below. 
+
+```{r}
+ggtsdisplay(ny1_train)
+```
+
+To check the Stationarity of the time series data, we need to run ADF, PP, and KPSS tests. Although the results from ADF and PP tests indicates the time series dataset is stationary by not rejecting the null hopythesis of stationarity, the KPSS test points out that it is not stationary by indicating that the p-value is smaller than 0.01, which rejects the null hypothesis of being stationary.
+
+```{r}
+adf.test(ny1_train)
+pp.test(ny1_train)
+kpss.test(ny1_train)
+```
+
+The $ndiffs$ funtions also points out that we need to take the first order of difference in terms of non-seasonality. After differecing, the $ndiffs$ function's output is 0, which means we do not need any more difference for stataionarity.
+
+```{r}
+ndiffs(ny1_train)
+ny1_train_diff <- diff(x = ny1_train, differences = 1)
+ndiffs(ny1_train_diff)
+```
+
+The p-value of the ADF and PP test is now smaller than 0.01 which rejects the null hypothesis of non-staionarity. And the kpss test points out the p-value greater than 0.1, which means we cannot reject the H0 of staionarity. Therefore, the time series data after taking the first order differece turned out to be stationary.
+
+```{r}
+adf.test(ny1_train_diff)
+pp.test(ny1_train_diff)
+kpss.test(ny1_train_diff)
+```
+
+Despite the non-seasonality difference, we can see some spikes on 7, 14, and 21 periodically, which might demonstrates that the dataset is not stationary in terms of seasonality as below.
+
+```{r}
+ggtsdisplay(ny1_train_diff) 
+```
+
+As depicted below, the third graph from the top shows that there might be seasonal factors in the dataset by showing the shorter gray bar which indicates the higher probability of significance.
+
+```{r}
+ny1_train_diff %>% stl(s.window = "period") %>% autoplot
+```
+
+However, the result from the $OCSB$ test points out we do not need to take a difference in seasonality as below.
+
+```{r}
+nsdiffs(ny1_train, m = 7, test = "ocsb", max.D = 1)
+```
+
+
+However, to find out the best predicting model, we need to build multiple models by running auto.arima with and without the seasonal difference separately as follows.
+
+```{r}
+auto.arima(ny1_train, d= 1, D = 1, trace = TRUE, ic = 'bic')
+```
+
+```{r}
+auto.arima(ny1_train, trace = TRUE, ic = 'bic')
+```
+
+Based on the information criteriors, there are four cadidate ARIMA models as below. The 1 and 2 models are the ones with the seasonal and non-seaonal difference. The other two models are with the only non-seaonal difference. 
+
+1. ARIMA(p=0,d=1,q=1)(P=0,D=1,Q=1)[7]: 848.8592
+2. ARIMA(  1,  1,  1)(  0,  1,  1)[7]: 853.1214
+3. ARIMA(  0,  1,  1)(  2,  0,  0)[7]: 922.2888
+4. ARIMA(  0,  1,  1)(  1,  0,  0)[7]: 922.9761
+
+
+With the parameters p, d, q, P, D, and Q above, we can build the estimated models as below. Moreover, we are now able to come up with the fourteen days forecast to choose the best model on accuracy.
+
+```{r}
+ny1_m1 <- Arima(ny1_train, order = c(0, 1, 1), 
+                seasonal = list(order = c(0, 1, 1), period = 7), 
+                include.drift = FALSE)
+ny1_m1_FCST <- forecast(ny1_m1, h = 14)
+
+ny1_m2 <- Arima(ny1_train, order = c(1, 1, 1), 
+                seasonal = list(order = c(0, 1, 1), period = 7), 
+                include.drift = FALSE)
+ny1_m2_FCST <- forecast(ny1_m2, h = 14)
+
+ny1_m3 <- Arima(ny1_train, order = c(0, 1, 1), 
+                seasonal = list(order = c(2, 0, 0), period = 7), 
+                include.drift = FALSE)
+ny1_m3_FCST <- forecast(ny1_m3, h = 14)
+
+ny1_m4 <- Arima(ny1_train, order = c(0, 1, 1), 
+                seasonal = list(order = c(1, 0, 0), period = 7), 
+                include.drift = FALSE)
+ny1_m4_FCST <- forecast(ny1_m4, h = 14)
+```
+
+The next step is to check if the residuals of each model follow the white noise process by $Box.test$, which means the residuals are independent from the time series data. The null hypothesis of the $Box.test$ is the time series residuals satisfy the white noise process. All of the models' p-values are above 0.05, which cannot reject the null hypothesis of following the white noise process. Therefore, the four models are valid to forecast in the time series.
+
+```{r}
+Box.test(ny1_m1$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ny1_m2$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ny1_m3$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ny1_m4$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+```
+
+# 2. Store in California 1 (ID: 46673)
+
+When it comes to the store labeld as 46673 in CA, there is a strong seaonal factor rather than a trend based on the below third plots from the top. 
+
+```{r}
+ca1_train %>% stl(s.window = "period") %>% autoplot
+```
+
+## Q1. Holt Winter Analysis
+
+From a result of $ets$ on the ca1 trainset, we conclude the $ETS(A, N, A)$, which demonstrates the additive error type, no trend, and the additive seaonal type. And the Holt winter model has exponential smoothing with trend and additive seasonal component. It seems that both the $ETS$ and $Holt Winters$ models fits well in the trainset as depicted. 
+
+```{r, results='asis', echo=FALSE, include=FALSE}
+ca1_train_ets <- ets(ca1_train, model = "ZZZ") #ETS(A, N, A)
+ca1_train_HW <- HoltWinters(ca1_train)
+```
+
+```{r}
+plot(ca1_train_HW, ylim = c(0, 250), main = "CA1_46673 Fitted")
+lines(fitted(ca1_train_ets), col = "blue", lty = 2)
+legend("bottomright",c("True value", "HW fitted", "ETS fitted"), lty = 1, col = c("black","red", "blue"))
+```
+
+When it comes to the prediction in the fourteen days as depicted below, the two models cannot represent the spikes. However, if we consider the spikes in the fourteen days as unpredictable outlier, then the both prediction from the two models are working well.
+
+```{r}
+ca1_train_ets_fcst <- forecast(ca1_train_ets, h = 14)
+ca1_train_HW_fcst <- forecast(ca1_train_HW, h = 14)
+
+plot(ca1_train_HW_fcst, ylim = c(0, 300), main = "CA1_46673 Forecast")
+lines(ca1)
+lines(ca1_train_ets_fcst$mean, col = "red")
+legend("bottomright",c("HW FCST", "ETS FCST"), lty = 2, col = c("blue","red"))
+```
+
+## Q2. ARIMA Analysis
+
+It is hard to argue what arima model will be based on the below ACF and PACF graphs. However, on every 7, 14, and 21 day, there is a spike observed. Therefore, we can assume that there might be a seasonal factor in the time series data as observed in the $ETS$ and $HW$ modeling.
+
+```{r}
+ggtsdisplay(ca1_train)
+```
+
+To check the stationarity of the data, the ADF, PP, and KPSS tests are executed. And the results show that the CA1 train data is statistically stationary, which means we do not need to take any difference.
+
+```{r}
+adf.test(ca1_train)
+pp.test(ca1_train)
+kpss.test(ca1_train)
+```
+
+To make sure, we can use the $ndiffs$ function for the difference. The outcome also tells that taking a difference will not be neccessary.
+
+```{r}
+ndiffs(ca1_train)
+```
+
+As observed in the CA1 graph that there might be the need to take a difference in terms of seaonality, we need to run the $OCSB$ test as below. However, the result, as opposed to our observation, indicates that we do not need any seasonal difference.
+
+```{r}
+nsdiffs(ca1_train, m = 7, test = "ocsb", max.D = 1)
+```
+
+Under the circumstances that the $OCSB$ test result is totally at variance with the obervation, we can build models with and without a seaonal difference, which is the element $D = 1$ in the $auto.arima$ function.
+
+```{r}
+auto.arima(ca1_train, trace = TRUE, ic = 'bic')
+```
+
+
+```{r}
+auto.arima(ca1_train, trace = TRUE, D = 1, ic = 'bic')
+```
+
+By using the $auto.arima$ function, we have the parameters for the 4 candidate models including the second best models as follows.
+
+1. ARIMA(p=0,d=0,q=0)(P=2,D=0,Q=0)[7]: 867.344
+2. ARIMA(  0,  0,  1)(  2,  0,  0)[7]: 869.8733
+3. ARIMA(  0,  0,  0)(  0,  1,  1)[7]: 781.1482
+4. ARIMA(  0,  0,  1)(  0,  1,  1)[7]: 782.7104
+
+The parameters have been plugged in the $Arima$ function, and we can have the fourteen days forecast to be compared with the testset in order to calculate the accuracy for the best model selection.
+
+```{r}
+ca1_m1 <- Arima(ca1_train, order = c(0, 0, 0), 
+                seasonal = list(order = c(2, 0, 0), period = 7), 
+                include.drift = FALSE)
+ca1_m1_FCST <- forecast(ca1_m1, h = 14)
+
+ca1_m2 <- Arima(ca1_train, order = c(0, 0, 1), 
+                seasonal = list(order = c(2, 0, 0), period = 7), 
+                include.drift = FALSE)
+ca1_m2_FCST <- forecast(ca1_m2, h = 14)
+
+ca1_m3 <- Arima(ca1_train, order = c(0, 0, 0), 
+                seasonal = list(order = c(0, 1, 1), period = 7), 
+                include.drift = FALSE)
+ca1_m3_FCST <- forecast(ca1_m3, h = 14)
+
+ca1_m4 <- Arima(ca1_train, order = c(0, 0, 1), 
+                seasonal = list(order = c(0, 1, 1), period = 7), 
+                include.drift = FALSE)
+ca1_m4_FCST <- forecast(ca1_m4, h = 14)
+```
+
+
+Just like the process in the first store, we need to verify if each model fits the data using residual analysis throughout the $Box.test$. As a result, p-values of the four models are above 0.05 which indicates the residuals of the models follows the white noise process. Therefore, we can use the four models to forecast the next fourteen days.
+
+```{r}
+Box.test(ca1_m1$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ca1_m2$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ca1_m3$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ca1_m4$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+```
+
+# 3. Store in New York 2 (ID: 20974)
+
+To begin with, it is hard to argue that there is either a trend or seasonality by looking at the trend and seaonal factors in the below graphs separately. 
+```{r}
+ny2_train %>% stl(s.window = "period") %>% autoplot
+```
+
+## Q1. Holt Winter Analysis
+
+The $ets$ function's outcome is ETS(A, N, A), which indicates that the time series data has the chracteristics with the additive error type, no trend, and additive seaonality. And the Holt winter model has exponential smoothing with trend and additive seasonal component. As depicted below, the fitted values from the both models do not match up with the true value.
+
+```{r}
+ny2_train_ets <- ets(ny2_train, model = "ZZZ") #ETS(A, N, A)
+ny2_train_HW <- HoltWinters(ny2_train)
+
+ny2_train_ets_fcst <- forecast(ny2_train_ets, h = 14)
+ny2_train_HW_fcst <- forecast(ny2_train_HW, h = 14)
+
+plot(ny2_train_HW, main = "NY2_20974 Fitted")
+lines(fitted(ny2_train_ets), col = "blue", lty = 2)
+legend("bottomright",c("True value", "HW fitted", "ETS fitted"), lty = 1, col = c("black","red", "blue"))
+```
+
+When it comes to the prediction in the fourteen days, both models do not represent the true values of the lettuce demand well with the similiar pattern especially on the peak season.
+
+```{r}
+ny2_train_ets_fcst <- forecast(ny2_train_ets, h = 14)
+ny2_train_HW_fcst <- forecast(ny2_train_HW, h = 14)
+
+plot(ny2_train_HW_fcst, ylim = c(0, 400), main = "NY2_20974 Forecast")
+lines(ny2)
+lines(ny2_train_ets_fcst$mean, col = "red")
+legend("bottomright",c("HW FCST", "ETS FCST"), lty = 2, col = c("blue","red"))
+```
+
+## Q2. ARIMA Analysis
+
+For the ARIMA modeling, we could take a look at the ACF and PACF firstly. It seems that the ACF values decreases exponentialy, whereas the values of the PACF has one spike on the first period. Therefore, we can assume that this could be the AR(1) model. 
+
+```{r}
+ggtsdisplay(ny2_train)
+```
+
+To check the staionarity of the data, the three tests have been executed as below. The p-values from the tests points out that the data follows the staionarity.
+
+```{r}
+adf.test(ny2_train) 
+pp.test(ny2_train)
+kpss.test(ny2_train) 
+```
+
+The $ndiffs$ function also indicates that it is unnecessary to take a difference of the data. 
+
+```{r}
+ndiffs(ny2_train)
+```
+
+When testing the $OCSB$ to check the need for the seaonal difference, we can see the result as 0, which points out the data is stationary in terms of seaonality. However, the seaonal difference is added to the $auto.arima$ function because we can observe some regular spike on the ACF chart.
+
+```{r}
+nsdiffs(ny2_train, m = 7, test = "ocsb", max.D = 1)
+```
+
+First of all, based on the information criteria, we can compare the models with one another. On top of that, I added the D=1 in the $auto.arima$ function for the seasonal difference in a manual way. As long as we can use the computational power, it is better to generate the possible candidates. 
+
+```{r}
+auto.arima(ny2_train, trace = TRUE, ic = 'bic')
+```
+
+```{r}
+auto.arima(ny2_train, D = 1, trace = TRUE, ic = 'bic')
+```
+
+We have found the parameters p, d, q, P, D, and Q of the ARIMA models as below.
+
+1. ARIMA(p=1,d=0,q=0)(P=1,D=0,Q=0)[7]: 799.672
+2. ARIMA(  0,  0,  0)(  1,  0,  0)[7]: 800.1286
+3. ARIMA(  0,  0,  0)(  1,  1,  0)[7]: 733.0689
+4. ARIMA(  1,  0,  0)(  1,  1,  0)[7]: 735.7234
+
+And the parameters have been plugged in the $Arima$ function to build the ARIMA models as below.
+
+```{r}
+ny2_m1 <- Arima(ny2_train, order = c(1, 0, 0), 
+                seasonal = list(order = c(1, 0, 0), period = 7), 
+                include.drift = FALSE)
+ny2_m1_FCST <- forecast(ny2_m1, h = 14)
+
+ny2_m2 <- Arima(ny2_train, order = c(0, 0, 0), 
+                seasonal = list(order = c(1, 0, 0), period = 7), 
+                include.drift = FALSE)
+ny2_m2_FCST <- forecast(ny2_m2, h = 14)
+
+ny2_m3 <- Arima(ny2_train, order = c(0, 0, 0), 
+                seasonal = list(order = c(1, 1, 0), period = 7), 
+                include.drift = FALSE)
+ny2_m3_FCST <- forecast(ny2_m3, h = 14)
+
+ny2_m4 <- Arima(ny2_train, order = c(1, 0, 0), 
+                seasonal = list(order = c(1, 1, 0), period = 7), 
+                include.drift = FALSE)
+ny2_m4_FCST <- forecast(ny2_m4, h = 14)
+```
+
+
+Now, we need to check if each model follows the white noise process throughout the $Box.test$ as below. As a result, the residuals from the four models are independent of the time series data, which is equal to satisfying the white noise process.
+
+```{r}
+Box.test(ny2_m1$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ny2_m2$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ny2_m3$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ny2_m4$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+```
+
+# 4. Store in California 2 (ID: 4904)
+
+To begin with, neither a trend nor a seaonality are observed in the below graphs by looking at the trend and seaonal factors separately. 
+```{r}
+ca2_train %>% stl(s.window = "period") %>% autoplot
+```
+
+## Q1. Holt Winters  Analysis
+
+To find out the parameters for the Holter Winters model, the $ets$ function has been executed. The outcome of the function shows that the time series data has the additive error type, no trend, and additive seaonality, which are represented as $ETS(A, N, A)$. And the Holt-Winters model has exponential smoothing with trend and additive seasonal component. As plotted below, the fitted values from the both models seems not only similiar but represent the true value well.
+
+```{r}
+ca2_train_ets <- ets(ca2_train, model = "ZZZ") #ETS(A, N, A)
+
+ca2_train_HW <- HoltWinters(ca2_train)
+
+ca2_train_ets_fcst <- forecast(ca2_train_ets, h = 14)
+ca2_train_HW_fcst <- forecast(ca2_train_HW, h = 14)
+
+plot(ca2_train_HW, main = "ca2_4904 Fitted")
+lines(fitted(ca2_train_ets), col = "blue", lty = 2)
+legend("bottomright",c("True value", "HW fitted", "ETS fitted"), lty = 1, col = c("black","red", "blue"))
+```
+
+For the prediction during the next fourteen days, both models represents the true values as plotted below. Both model seems similiar with a little differnce as a matter of the fact that the Holt Winters fits well with the upper spike and the ETS explains well for the lower spike.
+
+```{r}
+ca2_train_ets_fcst <- forecast(ca2_train_ets, h = 14)
+ca2_train_HW_fcst <- forecast(ca2_train_HW, h = 14)
+
+plot(ca2_train_HW_fcst, ylim = c(100, 500), main = "CA2_4904Forecast")
+lines(ca2)
+lines(ca2_train_ets_fcst$mean, col = "red")
+legend("bottomright",c("HW FCST", "ETS FCST"), lty = 2, col = c("blue","red"))
+```
+
+
+## Q2. ARIMA Analysis
+
+According to the ACF, there is a significant seaonality factor observed by the regular spikes on 3, 7, 11, 14,18, and 21. In addition, the ACF and PACF decays exponentially, which we can assume the ARMA(1, 1) in the time series data. 
+```{r}
+ggtsdisplay(ca2_train)
+```
+
+To confirm that the time series data is stationary, we need to take the ADF, PP, and KPSS tests. The reuslts shows that the trainset is stationary, which means we do not need to take any difference in terms of non-seasonality.
+
+```{r}
+adf.test(ca2_train)
+pp.test(ca2_train)
+kpss.test(ca2_train)
+```
+
+However, when it comes to the stationarity in the seasonal part, the $OCSB$ test shows that we need to take the first order difference as we observed in the ACF plot.
+
+```{r}
+nsdiffs(ca2_train, m = 7, test = "ocsb", max.D = 1) 
+```
+
+Therefore, by using the $auto.arima$ function, we can conclude the best model on the information criteria as below.
+
+```{r}
+auto.arima(ca2_train, trace = TRUE, ic = 'bic')
+```
+
+As a result of the $auto.arima$, we have the best and second best model as below.
+
+1. ARIMA(p=0,d=0,q=0)(P=2,D=1,Q=0)[7]: 814.8431
+2. ARIMA(  1,  0,  1)(  2,  1,  0)[7]: 815.9494
+
+By using the function $Arima$ we can build the two model with the above parameters.
+
+```{r}
+ca2_m1 <- Arima(ca2_train, order = c(0, 0, 0), 
+                seasonal = list(order = c(2, 1, 0), period = 7), 
+                include.drift = FALSE)
+ca2_m1_FCST <- forecast(ca2_m1, h = 14)
+
+ca2_m2 <- Arima(ca2_train, order = c(1, 0, 1), 
+                seasonal = list(order = c(2, 1, 0), period = 7), 
+                include.drift = FALSE)
+ca2_m2_FCST <- forecast(ca2_m2, h = 14)
+
+```
+
+The first model with the lowest information criteria does not follow the white noise by showing the p-value of the box test below 0.05. However, the p-value (0.08952) of the second model ARIMA(p=1,d=0,q=1)(P=2,D=1,Q=0) shows that we cannot reject the null hypothesis of following the white noise process. Therefore, the second model is only able to be used to predict the fourteen days.
+
+```{r}
+Box.test(ca2_m1$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+Box.test(ca2_m2$residuals, lag = 20, type = "Ljung-Box", fitdf = 4)
+```
+
+# 5. Best Model Selection (Question3)
+
+In the model selection, our goal is selecting the lowest error index in the testset and trainset, which indicates the best performance of the prediction in the fourteen days. In the NY_12631 times series, the fifth model built by $ets(ny1_train, model = "MNM")$ with alpha = 0.1106 and gamma = 1e-04 has the best performance.
+
+```{r}
+accuracy(ny1_m1_FCST, ny1_test) 
+accuracy(ny1_m2_FCST, ny1_test) 
+accuracy(ny1_m3_FCST, ny1_test)
+accuracy(ny1_m4_FCST, ny1_test)
+accuracy(ny1_train_ets_fcst, ny1_test)  #best model
+accuracy(ny1_train_HW_fcst, ny1_test)
+```
+
+In the CA_4904, the fourth model $ETS(model = (ANA)$ with alpha = 0.0969 and gamma = 1e-04 has the lowest RMSE in the trainset and the testset, which indicate the beset model for the prediction.
+
+```{r}
+accuracy(ca1_m1_FCST, ca1_test)
+accuracy(ca1_m2_FCST, ca1_test)
+accuracy(ca1_m3_FCST, ca1_test)
+accuracy(ca1_m4_FCST, ca1_test) 
+accuracy(ca1_train_ets_fcst, ca1_test) #best model
+accuracy(ca1_train_HW_fcst, ca1_test)
+```
+
+In the NY_20974, the second model ARIMA(p=0,d=0,q=0)(P=1,D=0,Q=0) is selected to predict because the RMSE in the testset is the lowest among the others.
+
+```{r}
+accuracy(ny2_m1_FCST, ny2_test)
+accuracy(ny2_m2_FCST, ny2_test) #best model
+accuracy(ny2_m3_FCST, ny2_test)
+accuracy(ny2_m4_FCST, ny2_test) 
+accuracy(ny2_train_ets_fcst, ny2_test)
+accuracy(ny2_train_HW_fcst, ny2_test)
+```
+
+For the CA 4904, the first model $ets(ca2_train, model = "ANA")$ with alpha = 0.1951 and gamma = 1e-04 has the lowest RMSE, which indicates the best model to predict.
+
+```{r}
+accuracy(ca2_m2_FCST, ca2_test)
+accuracy(ca2_train_ets_fcst, ca2_test)  #best Model
+accuracy(ca2_train_HW_fcst, ca2_test)
+```
+
+
+# 6. Forecast (Question 4)
+
+Based on the model selection in the part 5, we can build a model with the time series datasets including the total period. By using the $forecast$ model, the predicted demand for the lettus has been saved in the "lettuce_forecast.csv".
+
+```{r}
+CA1_46673 <- ets(ca1, model = "ANA", alpha = 0.0969 , gamma = 1e-04)
+CA1_46673_FCST <- forecast(CA1_46673, h = 14)
+
+CA2_4904 <- ets(ca2, model = "ANA", alpha = 0.1951 , gamma = 1e-04)
+CA2_4904_FCST <- forecast(CA2_4904, h = 14)
+
+NY1_12631 <- ets(ny1, model = "MNM", alpha = 0.1106 , gamma = 1e-04)
+NY1_12631_FCST <- forecast(NY1_12631, h = 14)
+
+NY2_20974 <- Arima(ny2, order = c(0, 0, 0), 
+                seasonal = list(order = c(1, 0, 0), period = 7), 
+                include.drift = FALSE)
+NY2_20974_FCST <- forecast(NY2_20974, h = 14)
+
+Store <- seq.Date(as.Date("2015-6-16"), as.Date("2015-6-29"), "day")
+
+lettus_fcst <- data.frame(CA_46673 = round(CA1_46673_FCST$mean,0), CA_4904 = round(CA2_4904_FCST$mean,0), NY_12631 = round(NY1_12631_FCST$mean,0), NY_20974 =
+round(NY2_20974_FCST$mean,0))
+
+colnames(lettus_fcst) <- c("California 1 (ID:46673)",
+                           "California 2 (ID:4904)",
+                           "New York 1 (ID:12631)",
+                           "New York 2 (ID:20974)")
+forecast <- cbind(Store, lettus_fcst)
+
+write.csv(forecast, file = "lettuce_forecast.csv", row.names = FALSE)
+```
+
+

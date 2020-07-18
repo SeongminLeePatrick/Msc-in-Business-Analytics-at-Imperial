@@ -1,0 +1,96 @@
+---
+title: "Homework 1 solutions"
+author: "Piotr Migdał"
+output: html_notebook
+---
+
+```{r}
+library(RPostgreSQL)
+password <- .rs.askForPassword("You database password.")
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "postgres",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = password)
+remove(password)
+```
+
+
+
+```{sql, connection=con}
+SELECT * FROM staff;
+```
+
+
+```{sql, connection=con}
+SELECT
+  *
+FROM
+  staff;
+```
+
+# 1
+
+Show all columns for the employees who started working not earlier than on 1 Jan 2016 and at the same time earn more than 3500. Order entries by surnames, a->z.
+
+```{sql, connection=con}
+SELECT *
+FROM staff 
+WHERE start_date >= '2016-01-01' AND salary > 3500
+ORDER BY surname;
+```
+
+# 2
+
+Show all other employees (vs 1.sql), but don’t use “NOT” in this query.
+
+```{sql, connection=con}
+SELECT *
+FROM staff 
+WHERE start_date < '2016-01-01' OR salary <= 3500
+ORDER BY surname;
+```
+
+# 3
+
+Show the total number of employees and their average salaries (name it: avg_salary), aggregated by department id. List only departments with at least 4 employees.
+
+```{sql, connection=con}
+SELECT
+    dept_id,
+    AVG(salary) AS avg_salary,
+    COUNT(*) AS count
+FROM staff 
+GROUP BY dept_id
+HAVING COUNT(*) >= 4;
+```
+
+# 4
+
+Show average salary by department colour.
+
+Return table with columns: department_colour, avg_salary.
+
+```{sql, connection=con}
+SELECT
+  colour AS department_colour,
+  AVG(salary) AS avg_salary
+FROM dept
+INNER JOIN staff ON dept.id = staff.dept_id
+GROUP BY colour;
+```
+
+# 5
+
+Show name, surname and boss_id for each employee whose boss is not present in the staff table. (HINT: you can join a table with itself; in JOIN you can use aliases, e.g. “staff AS bosses”.
+
+```{sql, connection=con}
+SELECT
+  staff.name,
+  staff.surname,
+  staff.boss_id
+FROM
+  staff
+LEFT JOIN
+  staff AS bosses ON staff.boss_id = bosses.id
+WHERE bosses.boss_id is NULL;
+```

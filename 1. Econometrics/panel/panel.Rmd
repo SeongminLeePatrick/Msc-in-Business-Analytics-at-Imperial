@@ -1,0 +1,100 @@
+---
+title: "Panel Data Analysis"
+author: "Jiahua Wu"
+subtitle: BS1802 Statistics and Econometrics
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+library(ggplot2)
+library(car)
+library(dplyr)
+library(stargazer)
+library(lmtest)
+library(plm)
+```
+
+## Example 9.7. City crime rates
+In this example, we have a panel data set with two periods - data on crime rates and unemployment rates were collected from a sample of 46 cities in 1982 and 1987. We want to study the impact of unemployment rates on cities' crime rates.
+
+One straightforward approach is just to treat the sample as a cross-sectional data set, and regress $crmrte$ on $unem$. We run the regression using data from 1987 alone, and data from both periods.
+```{r, results='asis'}
+# Example 9.7. City crime rates
+load("crime2.RData")
+crime.87 <- lm(crmrte ~ unem, data, subset = year == 87)
+crime.pool <- lm(crmrte ~ unem + d87, data)
+stargazer(crime.87, crime.pool, header = FALSE, type = 'latex', 
+          title = "Example 9.4. City Crime Rates", column.labels = c("1987","pool"))
+```
+The coefficient of $unem$ is insignificant, so we find no relationship between unemployment rates and crime rates. With this simple regression model, the result is likely biased because many relevant factors are not controlled for. 
+
+As we have a panel data set, we can control for those time invariant unobserved factor using a fixed effects panel data model. The function to estimate fixed effects model is given by $plm$ from $plm$ package. 
+
+Before we discuss regression, let us first talk about panel data manipulation. For any panel data set, we need to clearly specify the variable indicating cross sectional units, and the variable indicating time series unit. We can then convert a normal data frame into a panel data frame (also from $plm$ packages), where many common operations of panel data set are properly implemented.
+
+For this data set, we do not have a variable clearly indicating the city from which an observation is collected. Thus, we first create a $city$ variable, use it as an index for the cross sectional units.
+```{r}
+# create a panel data frame
+data$city <- rep(1:46, each = 2)
+data.p <- pdata.frame(data, index = c("city", "year"))
+```
+
+Once we have a panel data frame, we can use the many handy functions from $plm$ to analyze it. For instance, if we want to check out the index of the data set, we can use $index$ function, and it would tell us the cross sectional units and time series index for all observations.
+```{r, eval=FALSE}
+# index of a panel
+index(data.p)
+```
+
+$pdim$ function tells the overall structure of a panel data set, including # of cross-sectional units, # of periods for each cross-sectional unit, and total number of observations. A panel data set is called balance if each cross-sectional unit has the same number of observations.
+```{r}
+# dimensions of a panel
+pdim(data.p)
+```
+
+Other common operations for panel data include taking difference of adjacent observations from the same cross-sectional unit, and extracting lagged variables. These two operations are implemented by $diff$ and $lag$, respectively.
+```{r}
+head(data.p$unem, 10)
+
+# take difference of adjacent observations
+head(diff(data.p$unem), 10)
+
+# extract lagged unemployment rate
+head(lag(data.p$unem), 10)
+```
+
+Now we are ready to discuss the estimation of fixed effects panel data model. The first approach is first-differenced estimation. For this approach, we need to specify $effect=``individual"$ (so fixed effects are included in the model), and $model=``fd"$ (using first-difference for estimation). Interpretation of estimates is discussed on slide 12.
+```{r, results='asis'}
+# first difference estimation
+crime.fd <- plm(crmrte ~ d87 + unem, data, index = c("city", "year"), 
+                effect = "individual", model = "fd")
+stargazer(crime.fd, header = FALSE, type = 'latex', title = "Example 9.4. Fixed Effects")
+```
+
+## Example 14.1. Effect of job training on firm scrap rates
+In this example, we have data from 54 firms for three years 1987-1989. Some firms receive grants for training their workers in 1988 and 1989. We want to study how training grant would affect firms' scrap rates. In the fixed effects panel data model, we include two time dummies (for 1988 and 1989), a dummy indicating whether the firm receives the grant in the current year ($grant_{it}$), and a dummy indicating whether the firm receives the grant in the previous year ($grant_{i,t-1}$), as the effect of job training may well last for several years. 
+
+An alternative to first-differenced estimation is called fixed effects estimation, where we use demeaned variables in regression. Results from both first-differenced estimation and fixed effects estimation are presented in Table 3.
+```{r, results='asis'}
+# Example 14.1. Effect of job training on firm scrap rates
+load("jtrain.RData")
+scrap.fe <- plm(log(scrap) ~ grant + grant_1 + d88 + d89, data, 
+                index = c("fcode", "year"), effect = "individual", model = "within")
+
+scrap.fd <- plm(log(scrap) ~ 0 + grant + grant_1 + d88 + d89, data, 
+                index = c("fcode", "year"), effect = "individual", model = "fd")
+stargazer(scrap.fe, scrap.fd, header = FALSE, type = 'latex', 
+          title = "Example 14.1", column.labels = c("fixed effects","first difference"))
+```
+With the first-differenced estimation, we need to explicitly exclude intercept in the regression to properly estimate coefficients for $d88$ and $d89$. Because after taking first difference, we have only two observations for each firm, and thus we cannot have all three of overall intercept, $d88$ and $d89$ in the model.
+
+Results from fixed effects and first difference differ in most cases (unless we have a panel data set with only two periods). In this example, $grant$ and $d89$ are significant at 10% level in both models, however, lagged grant $grant_{-1}$ is significant at 5% level using fixed effects estimation while not significant at all using first-differenced estimation. We shall keep this in mind, when we interpret the results. $R^2$ is not comparable from the two models because the dependent variables are different. In the fixed effects estimation, dependent variable is demeaned $log(scrap)$, while it is the difference of $log(scrap)$ from adjacent observations using the first differenced estimation.
+
+The relative efficiency of the two approaches depend on serial correlation in $u_{it}$. The function for serial correlation test is implemented with $pwartset$. The way to understand the test result is as follows. The null hypothesis is $H_0: \mbox{there is no serial correlation}$. So we reject null, and conlude that there is serial correlation in $u_{it}$ when $p$-value is sufficiently small, which is the case in this example.
+```{r}
+# test for autocorrelation
+pwartest(scrap.fe)
+```

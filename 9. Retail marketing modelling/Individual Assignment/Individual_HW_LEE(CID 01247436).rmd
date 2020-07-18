@@ -1,0 +1,789 @@
+---
+title: "Retail Marketing Individual Assingment"
+author: "Seongmin Lee(CID: 01247436)"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(kableExtra)
+library(imputeTS)
+library(tseries)
+```
+
+```{r}
+setwd("~/00. Spring/01. Retail Marketing/Assessment/Individual Assignment/Final")
+
+#load dataset
+df <- read_excel("Database Fragrances RMA.xlsx", sheet = 1)
+
+data <- df %>% select('Record', 'Date', 
+                      'Volume_ARMANI_SI','Volume_YSL_BLACK_OPIUM', 'Volume_LANCOME_LA_VIE_EST_BELLE',"Volume_DIOR_JADORE", "Volume_DIOR_POISON","Volume_CHANEL_NO5", "Volume_CHANEL_COCO_MADEMOISELLE", "Volume_NARCISO_RODRIGUEZ_FOR_HER",    
+                      'Price_ARMANI_SI', 'Price_YSL_BLACK_OPIUM','Price_LANCOME_LA_VIE_EST_BELLE', "Price_DIOR_JADORE", "Price_DIOR_POISON", "Price_CHANEL_NO5", "Price_CHANEL_COCO_MADEMOISELLE", "Price_NARCISO_RODRIGUEZ_FOR_HER",
+                      'Investment_ARMANI_SI','Investment_YSL_BLACK_OPIUM', 'Investment_LANCOME_LA_VIE_EST_BELLE',"Investment_DIOR_JADORE", "Investment_DIOR_POISON" , "Investment_CHANEL_NO5", "Investment_CHANEL_COCO_MADEMOISELLE" , "Investment_NARCISO_RODRIGUEZ_FOR_HER",
+                      'Value_ARMANI_SI','Value_YSL_BLACK_OPIUM', 'Value_LANCOME_LA_VIE_EST_BELLE',"Value_DIOR_JADORE", "Value_DIOR_POISON" , "Value_CHANEL_NO5", "Value_CHANEL_COCO_MADEMOISELLE" , "Value_NARCISO_RODRIGUEZ_FOR_HER",                      
+                      'Investment_TOTAL_MARKET', "Volume_MERCATO")
+
+#"Value_ARMANI_SI", "Value_YSL_BLACK_OPIUM", "Value_LANCOME_LA_VIE_EST_BELLE", "Value_DIOR_JADORE", "Value_DIOR_POISON", "Value_CHANEL_NO5", "Value_CHANEL_COCO_MADEMOISELLE", "Value_NARCISO_RODRIGUEZ_FOR_HER", "Value_MARKET"    
+#'Value_MARKET', 'Investment_TOTAL_MARKET', "Volume_MERCATO"
+
+
+colnames(data) <- c('Weeknum', 'Date', 
+                    'Volume_ARMANI','Volume_YSL', 'Volume_LANCOME',"Volume_DIOR_J", "Volume_DIOR_P","Volume_CHANEL_NO5", "Volume_CHANEL_COCO", "Volume_NARCISO",    
+                    'Price_ARMANI', 'Price_YSL','Price_LANCOME', "Price_DIOR_J", "Price_DIOR_P", "Price_CHANEL_NO5", "Price_CHANEL_COCO", "Price_NARCISO",
+                    'Invest_ARMANI','Invest_YSL', 'Invest_LANCOME',"Invest_DIOR_J", "Invest_DIOR_P" , "Invest_CHANEL_NO5", "Invest_CHANEL_COCO" , "Invest_NARCISO",
+                    'Value_ARMANI','Value_YSL', 'Value_LANCOME',"Value_DIOR_J", "Value_DIOR_P" , "Value_CHANEL_NO5", "Value_CHANEL_COCO" , "Value_NARCISO",
+                    'Invest_TOTAL', "Volume_TOTAL")
+
+# data$Date <- as.Date(data$Date, "%d/%m/%y")
+
+# weekly
+for (i in 1:nrow(data)){
+  ifelse(i<= 52, data$Weeknumber[i] <- i, data$Weeknumber[i] <- i - 52)
+}
+
+for (i in 1:nrow(data)){
+  ifelse(data$Weeknumber[i] <= 52, data$Weeknumber[i], data$Weeknumber[i] <- data$Weeknumber[i] - 52)
+}
+
+data$Weeknum <- 1:nrow(data)
+
+#missing value
+data <- data %>% mutate_at(vars(starts_with("Volume")), funs(na.kalman(.)))
+data <- data %>% mutate_at(vars(starts_with("Value")), funs(na.kalman(.)))
+
+data$Price_DIOR_J <- data$Value_DIOR_J/data$Volume_DIOR_J
+data$Price_DIOR_P <- data$Value_DIOR_P/data$Volume_DIOR_P
+data$Price_CHANEL_NO5 <- data$Value_CHANEL_NO5/data$Volume_CHANEL_NO5
+data$Price_CHANEL_COCO <- data$Value_CHANEL_COCO/data$Volume_CHANEL_COCO
+data$Price_NARCISO <- data$Value_NARCISO/data$Volume_NARCISO
+
+#Weekly average Price
+data$avg_weekly_price <- 1
+for (i in 1:nrow(data)){
+  data$avg_weekly_price[i] <- (data$Price_ARMANI[i] +  data$Price_YSL[i] + data$Price_CHANEL_COCO[i] + data$Price_CHANEL_NO5[i] + data$Price_DIOR_J[i] + data$Price_DIOR_P[i] + data$Price_LANCOME[i] + data$Price_NARCISO[i])/8
+}
+
+#Peak-season Dummy variable
+avg_Volume <- mean(data$Volume_TOTAL)
+avg_Invest <- mean(data$Invest_TOTAL)
+data$seasonality <- ifelse(data$Volume_TOTAL > (avg_Volume) & data$Invest_TOTAL > (avg_Invest), 1, 0)
+
+#Manually Peak-season Dummy
+data$seasonality <- 0
+index <- c(5, 6, 18, 44, 45, 46, 47, 49, 50, 51, 57, 58, 70, 96, 97, 98, 99, 101, 102, 103, 109, 110, 123)
+for (i in index){
+  data$seasonality[i] <- 1
+}
+
+png(filename="1.png")
+TTL_MKT <- par(mar = c(5,4,4,4) + 0.1)
+plot(data$Weeknumber, data$avg_weekly_price, type="l", col="blue",xlab="", ylab="")
+lines(data$seasonality*68)   # c is the promotion dummy from the other RMD
+par(new=TRUE)
+plot(data$Weeknumber, data$Volume_TOTAL,type="l",col="red",xaxt="n",yaxt="n",xlab="Week",ylab="AVG Price")
+axis(4)
+mtext("Total Market")
+mtext("Total Volumn", side = 4, line = 3, cex = par("cex.lab"))
+legend("topleft",col=c("blue","red", "black"), lty=1, legend=c("AVG Price","Volume","Seasonality"), cex=0.7, bty = "n")
+par(TTL_MKT)
+dev.off()
+```
+
+
+
+```{r}
+price_AR_mean <- mean(data$Price_ARMANI, na.rm = TRUE)
+price_YSL_mean <- mean(data$Price_YSL, na.rm = TRUE)
+price_LAN_mean <- mean(data$Price_LANCOME, na.rm = TRUE)
+price_DIOR_J_mean <- mean(data$Price_DIOR_J, na.rm = TRUE)
+price_DIOR_P_mean <- mean(data$Price_DIOR_P, na.rm = TRUE)
+price_CH_NO5_mean <- mean(data$Price_CHANEL_NO5, na.rm = TRUE)
+price_CH_COCO_mean <- mean(data$Price_CHANEL_COCO, na.rm = TRUE)
+price_NAR_mean <- mean(data$Price_NARCISO, na.rm = TRUE)
+
+vol_AR_mean <- mean(data$Volume_ARMANI, na.rm = TRUE)
+vol_YSL_mean <- mean(data$Volume_YSL, na.rm = TRUE)
+vol_LAN_mean <- mean(data$Volume_LANCOME, na.rm = TRUE)
+vol_DIOR_J_mean <- mean(data$Volume_DIOR_J, na.rm = TRUE)
+vol_DIOR_P_mean <- mean(data$Volume_DIOR_P, na.rm = TRUE)
+vol_CH_NO5_mean <- mean(data$Volume_CHANEL_NO5, na.rm = TRUE)
+vol_CH_COCO_mean <- mean(data$Volume_CHANEL_COCO, na.rm = TRUE)
+vol_NAR_mean <- mean(data$Volume_NARCISO, na.rm = TRUE)
+
+price_AR_max <- max(data$Price_ARMANI, na.rm = TRUE)
+price_YSL_max <- max(data$Price_YSL, na.rm = TRUE)
+price_LAN_max <- max(data$Price_LANCOME, na.rm = TRUE)
+price_DIOR_J_max <- max(data$Price_DIOR_J, na.rm = TRUE)
+price_DIOR_P_max <- max(data$Price_DIOR_P, na.rm = TRUE)
+price_CH_NO5_max <- max(data$Price_CHANEL_NO5, na.rm = TRUE)
+price_CH_COCO_max <- max(data$Price_CHANEL_COCO, na.rm = TRUE)
+price_NAR_max <- max(data$Price_NARCISO, na.rm = TRUE)
+
+price_AR_min <- min(data$Price_ARMANI, na.rm = TRUE)
+price_YSL_min <- min(data$Price_YSL, na.rm = TRUE)
+price_LAN_min <- min(data$Price_LANCOME, na.rm = TRUE)
+price_DIOR_J_min <- min(data$Price_DIOR_J, na.rm = TRUE)
+price_DIOR_P_min <- min(data$Price_DIOR_P, na.rm = TRUE)
+price_CH_NO5_min <- min(data$Price_CHANEL_NO5, na.rm = TRUE)
+price_CH_COCO_min <- min(data$Price_CHANEL_COCO, na.rm = TRUE)
+price_NAR_min <- min(data$Price_NARCISO, na.rm = TRUE)
+
+price_AR_sd <- sd(data$Price_ARMANI, na.rm = TRUE)
+price_YSL_sd <- sd(data$Price_YSL, na.rm = TRUE)
+price_LAN_sd <- sd(data$Price_LANCOME, na.rm = TRUE)
+price_DIOR_J_sd <- sd(data$Price_DIOR_J, na.rm = TRUE)
+price_DIOR_P_sd <- sd(data$Price_DIOR_P, na.rm = TRUE)
+price_CH_NO5_sd <- sd(data$Price_CHANEL_NO5, na.rm = TRUE)
+price_CH_COCO_sd <- sd(data$Price_CHANEL_COCO, na.rm = TRUE)
+price_NAR_sd <- sd(data$Price_NARCISO, na.rm = TRUE)
+
+TTL_MS_AR <- data$Volume_ARMANI/data$Volume_TOTAL
+TTL_MS_YSL <- data$Volume_YSL/data$Volume_TOTAL
+TTL_MS_LAN <- data$Volume_LANCOME/data$Volume_TOTAL
+TTL_MS_DIOR_J <- data$Volume_DIOR_J/data$Volume_TOTAL
+TTL_MS_DIOR_P <- data$Volume_DIOR_P/data$Volume_TOTAL
+TTL_MS_CH_NO5 <- data$Volume_CHANEL_NO5/data$Volume_TOTAL
+TTL_MS_CH_COCO <- data$Volume_CHANEL_COCO/data$Volume_TOTAL
+TTL_MS_NAR <- data$Volume_NARCISO/data$Volume_TOTAL
+
+
+summary_matrix <- matrix(c(price_AR_mean, price_YSL_mean, price_LAN_mean, price_DIOR_J_mean, price_DIOR_P_mean, price_CH_NO5_mean, price_CH_COCO_mean, price_NAR_mean,
+                           price_AR_max, price_YSL_max, price_LAN_max, price_DIOR_J_max, price_DIOR_P_max, price_CH_NO5_max, price_CH_COCO_max, price_NAR_max,
+                           price_AR_min, price_YSL_min, price_LAN_min, price_DIOR_J_min, price_DIOR_P_min, price_CH_NO5_min, price_CH_COCO_min, price_NAR_min,
+                           price_AR_sd, price_YSL_sd, price_LAN_sd, price_DIOR_J_sd, price_DIOR_P_sd, price_CH_NO5_sd, price_CH_COCO_sd, price_NAR_sd,
+                           vol_AR_mean, vol_YSL_mean, vol_LAN_mean, vol_DIOR_J_mean, vol_DIOR_P_mean, vol_CH_NO5_mean, vol_CH_COCO_mean, vol_NAR_mean), 
+                         nrow = 8, ncol = 5)
+
+row.names(summary_matrix) <- c("ARMANI","YSL","LANCOME", "DIOR J","DIOR P", "CHANEL NO5", "CHANEL COCO", "NARCISO")
+
+kable(summary_matrix, col.names = c("AVG Price", "MAX Price", "MIN Price", "SD Price", "AVG Volume"), digits = 2)
+```
+
+
+```{r}
+#Add log variables
+data$log_price_ARMANI <- log(data$Price_ARMANI)
+data$log_price_YSL<- log(data$Price_YSL)
+data$log_price_LANCOME <- log(data$Price_LANCOME)
+data$log_price_DIOR_J <- log(data$Price_DIOR_J)
+data$log_price_DIOR_P <- log(data$Price_DIOR_P)
+data$log_price_CHANEL_NO5 <- log(data$Price_CHANEL_NO5)
+data$log_price_CHANEL_COCO <- log(data$Price_CHANEL_COCO)
+data$log_price_NARCISO <- log(data$Price_NARCISO)
+
+data$log_volume_ARMANI <- log(data$Volume_ARMANI) 
+data$log_volume_YSL <- log(data$Volume_YSL)
+data$log_volume_LANCOME <- log(data$Volume_LANCOME)
+data$log_volume_DIOR_J <- log(data$Volume_DIOR_J)
+data$log_volume_DIOR_P <- log(data$Volume_DIOR_P)
+data$log_volume_CHANEL_NO5 <- log(data$Volume_CHANEL_NO5)
+data$log_volume_CHANEL_COCO <- log(data$Volume_CHANEL_COCO)
+data$log_volume_NARCISO <- log(data$Volume_NARCISO)
+
+data$lag_Volume_ARMANI <- c(NA, head(data$Volume_ARMANI, -1)) 
+data$lag_Volume_YSL <- c(NA, head(data$Volume_YSL, -1)) 
+data$lag_Volume_LANCOME <- c(NA, head(data$Volume_LANCOME, -1))
+
+data <- data %>%
+  mutate(Invest_ARMANI_log = log(Invest_ARMANI),
+         Invest_YSL_log = log(Invest_YSL),
+         Invest_LANCOME_log = log(Invest_LANCOME))
+
+data$Invest_ARMANI_log[is.infinite(data$Invest_ARMANI_log)] <- 0
+data$Invest_YSL_log[is.infinite(data$Invest_YSL_log)] <- 0
+data$Invest_LANCOME_log[is.infinite(data$Invest_LANCOME_log)] <- 0
+```
+
+
+```{r}
+png(filename="1.png")
+TTL_MKT1 <- par(mar = c(5,4,4,4) + 0.1)
+plot(data$Weeknum, data$avg_weekly_price, type="l", col="blue",xlab="", ylab="")
+lines(data$seasonality*68) 
+par(new=TRUE)
+plot(data$Weeknum, data$Volume_TOTAL,type="l",col="red",xaxt="n",yaxt="n",xlab="Week",ylab="AVG Price")
+axis(4)
+mtext("Total Market")
+mtext("Total Volumn", side = 4, line = 3, cex = par("cex.lab"))
+legend("topleft",col=c("blue","red", "black"), lty=1, legend=c("AVG Price","Volume","Seasonality"), cex=0.7, bty = "n")
+par(TTL_MKT1)
+dev.off()
+
+
+png(filename="2.png")
+TTL_MKT2 <- par(mar = c(5,4,4,4) + 0.1)
+plot(data$Weeknum, data$Price_ARMANI, type="l", col="blue",xlab="",ylab="")
+lines(data$seasonality*60)
+par(new=TRUE)
+plot(data$Weeknum, data$Volume_ARMANI,type="l",col="red",xaxt="n",yaxt="n",xlab="Week",ylab="Price")
+axis(4)
+mtext("ARMANI")
+mtext("Volume", side = 4, line = 3, cex = par("cex.lab"))
+legend("topleft",col=c("blue","red","black"), lty=1, legend=c("Price","Volume", "Seasonality"), cex=0.7, bty = "n")
+par(TTL_MKT2)
+dev.off()
+
+png(filename="3.png")
+TTL_MKT3 <- par(mar = c(5,4,4,4) + 0.1)
+plot(data$Weeknum, data$Price_YSL, type="l", col="blue",xlab="",ylab="")
+lines(data$seasonality*63)  
+par(new=TRUE)
+plot(data$Weeknum, data$Volume_YSL,type="l",col="red",xaxt="n",yaxt="n",xlab="Week",ylab="Price")
+axis(4)
+mtext("YSL")
+mtext("Volume", side = 4, line = 3, cex = par("cex.lab"))
+legend("topleft",col=c("blue","red","black"), lty=1, legend=c("Price","Volume", "Seasonality"), cex=0.7, bty = "n")
+par(TTL_MKT3)
+dev.off()
+
+png(filename="4.png")
+TTL_MKT4 <- par(mar = c(5,4,4,4) + 0.1)
+plot(data$Weeknum, data$Price_LANCOME, type="l", col="blue",xlab="",ylab="")
+lines(data$seasonality*60) 
+par(new=TRUE)
+plot(data$Weeknum, data$Volume_LANCOME,type="l",col="red",xaxt="n",yaxt="n",xlab="Week",ylab="Price")
+axis(4)
+mtext("LANCOME")
+mtext("Volume", side = 4, line = 3, cex = par("cex.lab"))
+legend("topleft",col=c("blue","red","black"), lty=1, legend=c("Price","Volume", "Seasonality"), cex=0.7, bty = "n")
+par(TTL_MKT4)
+dev.off()
+```
+
+```{r}
+rmse <- function(error)
+{
+  sqrt(mean(error^2))
+}
+
+data1 <- data %>% select("Weeknumber", "seasonality",
+                         "Volume_ARMANI", "Volume_YSL", "Volume_LANCOME",
+                         "Price_ARMANI", "Price_YSL", "Price_LANCOME",
+                         "Invest_ARMANI", "Invest_YSL", "Invest_LANCOME",
+                         "log_price_ARMANI", "log_price_YSL", "log_price_LANCOME",
+                         "log_volume_ARMANI", "log_volume_YSL", "log_volume_LANCOME", "lag_Volume_ARMANI", "lag_Volume_YSL", "lag_Volume_LANCOME")
+
+data1 <- data[!is.na(data$lag_Volume_ARMANI),]
+
+null_AR <- lm(Volume_ARMANI ~ 1, data = data1)
+full_AR <- lm(Volume_ARMANI ~  lag_Volume_ARMANI + 
+                Price_ARMANI + Price_YSL + Price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_AR, scope = list (upper = full_AR), data = data1, direction = "both")
+
+ARMANI_linear <- lm(formula = Volume_ARMANI ~ Invest_ARMANI + lag_Volume_ARMANI + 
+    Invest_LANCOME + seasonality + Price_ARMANI + Invest_YSL, 
+    data = data1)
+
+
+# Semi-Log Form
+null_AR <- lm(log_volume_ARMANI ~ 1, data = data1)
+full_AR <- lm(log_volume_ARMANI ~  lag_Volume_ARMANI + 
+                Price_ARMANI + Price_YSL + Price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_AR, scope = list (upper = full_AR), data = data1, direction = "both")
+
+ARMANI_semilog <- lm(formula = log_volume_ARMANI ~ Invest_ARMANI + lag_Volume_ARMANI + 
+    Invest_LANCOME + seasonality + Price_ARMANI + Invest_YSL, 
+    data = data1)
+
+
+# Log-log Form
+null_AR <- lm(log_volume_ARMANI ~ 1, data = data1)
+full_AR <- lm(log_volume_ARMANI ~  lag_Volume_ARMANI + 
+                log_price_ARMANI + log_price_YSL + log_price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_AR, scope = list (upper = full_AR), data = data1, direction = "both")
+
+ARMANI_log <- lm(formula = log_volume_ARMANI ~ Invest_ARMANI + lag_Volume_ARMANI + 
+    Invest_LANCOME + seasonality + log_price_ARMANI + Invest_YSL, 
+    data = data1)
+
+
+
+
+rmse(fitted(ARMANI_linear) - data1$Volume_ARMANI)
+rmse(exp(fitted(ARMANI_semilog)) - data1$Volume_ARMANI)
+rmse(exp(fitted(ARMANI_log)) - data1$Volume_ARMANI)
+
+best_ARMANI <- ARMANI_semilog
+```
+
+
+
+```{r}
+null_YSL <- lm(Volume_YSL ~ 1, data = data1)
+full_YSL <- lm(Volume_YSL ~  lag_Volume_YSL +
+                Price_ARMANI + Price_YSL + Price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_YSL, scope = list (upper = full_YSL), data = data1, direction = "both")
+
+YSL_linear <- lm(formula = Volume_YSL ~ Invest_ARMANI + lag_Volume_YSL + seasonality + 
+    Invest_YSL + Invest_LANCOME, data = data1)
+
+
+# Semi-Log Form
+null_YSL <- lm(log_volume_YSL ~ 1, data = data1)
+full_YSL <- lm(log_volume_YSL ~  lag_Volume_YSL +
+                Price_ARMANI + Price_YSL + Price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_YSL, scope = list (upper = full_YSL), data = data1, direction = "both")
+
+YSL_semilog <- lm(formula = log_volume_YSL ~ Invest_ARMANI + lag_Volume_YSL + 
+    seasonality + Price_YSL + Invest_LANCOME + Invest_YSL + Price_ARMANI, 
+    data = data1)
+
+
+# Log-log Form
+null_YSL <- lm(log_volume_YSL ~ 1, data = data1)
+full_YSL <- lm(log_volume_YSL ~  lag_Volume_YSL +
+                log_price_ARMANI + log_price_YSL + log_price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_YSL, scope = list (upper = full_YSL), data = data1, direction = "both")
+
+YSL_log <- lm(formula = log_volume_YSL ~ Invest_ARMANI + lag_Volume_YSL + 
+    seasonality + log_price_YSL + Invest_LANCOME + Invest_YSL + 
+    log_price_ARMANI, data = data1)
+
+
+
+rmse(fitted(YSL_linear) - data1$Volume_YSL)
+rmse(exp(fitted(YSL_semilog)) - data1$Volume_YSL)
+rmse(exp(fitted(YSL_log)) - data1$Volume_YSL)
+
+best_YSL <- YSL_log
+```
+
+```{r}
+null_LANCOME <- lm(Volume_LANCOME ~ 1, data = data1)
+full_LANCOME <- lm(Volume_LANCOME ~  lag_Volume_LANCOME +
+                Price_ARMANI + Price_YSL + Price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_LANCOME, scope = list (upper = full_LANCOME), data = data1, direction = "both")
+
+LANCOME_linear <- lm(formula = Volume_LANCOME ~ Invest_ARMANI + lag_Volume_LANCOME + 
+    seasonality + Invest_LANCOME, data = data1)
+
+# Semi-Log Form
+null_LANCOME <- lm(log_volume_LANCOME ~ 1, data = data1)
+full_LANCOME <- lm(log_volume_LANCOME ~ lag_Volume_LANCOME + 
+                Price_ARMANI + Price_YSL + Price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_LANCOME, scope = list (upper = full_LANCOME), data = data1, direction = "both")
+
+LANCOME_semilog <-lm(formula = log_volume_LANCOME ~ Invest_ARMANI + lag_Volume_LANCOME + 
+    Invest_LANCOME + seasonality + Price_YSL, data = data1)
+
+# Log-log Form
+null_LANCOME <- lm(log_volume_LANCOME ~ 1, data = data1)
+full_LANCOME <- lm(log_volume_LANCOME ~  lag_Volume_LANCOME +
+                log_price_ARMANI + log_price_YSL + log_price_LANCOME + 
+                Invest_ARMANI + Invest_YSL + Invest_LANCOME + seasonality,  data = data1)
+
+step(null_LANCOME, scope = list (upper = full_LANCOME), data = data1, direction = "both")
+
+LANCOME_log <- lm(formula = log_volume_LANCOME ~ Invest_ARMANI + lag_Volume_LANCOME + Invest_LANCOME + seasonality + log_price_YSL, data = data1)
+
+rmse(fitted(LANCOME_linear) - data1$Volume_LANCOME)
+rmse(exp(fitted(LANCOME_semilog)) - data1$Volume_LANCOME)
+rmse(exp(fitted(LANCOME_log)) - data1$Volume_LANCOME)
+
+best_LANCOME<- LANCOME_log
+```
+
+
+
+```{r}
+#Elasticity
+
+#ARMANI_log [best_ARMANI]
+elasticity_AR_AR <- summary(best_ARMANI)$coefficients[6] * mean(data$Price_ARMANI)
+elasticity_AR_YS <- 0
+elasticity_AR_LA <- 0
+
+#YSL_semilog [best_YSL]
+elasticity_YS_AR <- summary(best_YSL)$coefficients[8] 
+elasticity_YS_YS <- summary(best_YSL)$coefficients[5]
+elasticity_YS_LA <- 0 
+
+#LANCOME_log [best_LANCOME]
+elasticity_LA_AR <- 0 
+elasticity_LA_YS <- 0
+elasticity_LA_LA <- 0
+
+
+#Elasticity Matrix
+e_matrix <- matrix(c(elasticity_AR_AR, elasticity_AR_YS, elasticity_AR_LA, 
+                     elasticity_YS_AR, elasticity_YS_YS, elasticity_YS_LA, 
+                     elasticity_LA_AR, elasticity_LA_YS, elasticity_LA_LA 
+                    ), 
+                     nrow = 3, ncol = 3, byrow = TRUE)
+                   
+rownames(e_matrix) <- c('ARMANI','YSL','LANCOME')
+colnames(e_matrix) <- c('ARMANI','YSL','LANCOME')
+
+kable(e_matrix, col.names = c("ARMANI", "YSL", "LANCOME"), digits = 2, caption = "Elasticity Matrix")
+```
+
+```{r}
+# clout vulnerability table and plot
+clout_AR <- elasticity_AR_AR + elasticity_YS_AR + elasticity_LA_AR  
+clout_YS <- elasticity_AR_YS + elasticity_YS_YS + elasticity_LA_YS  
+clout_LA <- elasticity_AR_LA + elasticity_YS_LA + elasticity_LA_LA  
+
+
+vul_AR <- elasticity_AR_AR + elasticity_AR_YS + elasticity_AR_LA
+vul_YS <- elasticity_YS_AR + elasticity_YS_YS + elasticity_YS_LA
+vul_LA <- elasticity_LA_AR + elasticity_LA_YS + elasticity_LA_LA
+
+
+brand = c("ARMANI", "YSL", "LANCOME")
+
+vul_total = c(vul_AR, vul_YS, vul_LA)
+
+clout_total = c(clout_AR, clout_YS, clout_LA)
+
+df_vul_clout <- data.frame(brand, vul_total, clout_total)
+
+kable(df_vul_clout, col.names = c("Brand", "Vulneribility", "Clout"), digit = 2, caption = "")
+```
+
+
+```{r}
+ts_ARMANI <- ts(data$Volume_ARMANI, frequency = 4)
+ts_YSL <- ts(data$Volume_YSL, frequency = 4)
+ts_LANCOME <- ts(data$Volume_LANCOME, frequency = 4)
+plot(stl(ts_ARMANI,'periodic'))
+plot(stl(ts_YSL,'periodic'))
+plot(stl(ts_LANCOME,'periodic'))
+```
+
+```{r}
+adf.test(data$Volume_ARMANI) # rejected - stationary
+pp.test(data$Volume_ARMANI) # rejected - stationary
+kpss.test(data$Volume_ARMANI) # not rejected -  stationary
+
+adf.test(data$Volume_YSL) # not  rejected - Unit Root
+pp.test(data$Volume_YSL) # rejected - stationary
+kpss.test(data$Volume_YSL) # not rejected -  stationary
+
+adf.test(data$Volume_LANCOME) # rejected - stationary
+pp.test(data$Volume_LANCOME) # rejected - stationary
+kpss.test(data$Volume_LANCOME) # not rejected -  stationary
+
+adf.test(data$Invest_ARMANI) # rejected - stationary
+pp.test(data$Invest_ARMANI) # rejected - stationary
+kpss.test(data$Invest_ARMANI) # not rejected -  stationary
+
+adf.test(data$Invest_YSL) # rejected - stationary
+pp.test(data$Invest_YSL) # rejected - stationary
+kpss.test(data$Invest_YSL) # not rejected -  stationary
+
+adf.test(data$Invest_LANCOME) # rejected - stationary
+pp.test(data$Invest_LANCOME) # rejected - stationary
+kpss.test(data$Invest_LANCOME) # not rejected -  stationary
+```
+
+```{r}
+data <- data %>%
+  mutate(Invest_ARMANI_log = log(Invest_ARMANI),
+         Invest_ARMANI_sqr = Invest_ARMANI^2,
+         Invest_ARMANI_lag = lag(Invest_ARMANI, 1),
+         Invest_YSL_log = log(Invest_YSL),
+         Invest_YSL_sqr = Invest_YSL^2,
+         Invest_YSL_lag = lag(Invest_YSL, 1),
+         Invest_LANCOME_log = log(Invest_LANCOME),
+         Invest_LANCOME_sqr = Invest_LANCOME^2,
+         Invest_LANCOME_lag = lag(Invest_LANCOME, 1))
+
+data$Invest_ARMANI_log[is.infinite(data$Invest_ARMANI_log)] <- 0
+data$Invest_YSL_log[is.infinite(data$Invest_YSL_log)] <- 0
+data$Invest_LANCOME_log[is.infinite(data$Invest_LANCOME_log)] <- 0
+
+data$lag_Volume_ARMANI <- c(NA, head(data$Volume_ARMANI, -1)) 
+data$lag_Volume_YSL <- c(NA, head(data$Volume_YSL, -1)) 
+data$lag_Volume_LANCOME <- c(NA, head(data$Volume_LANCOME, -1)) 
+data$month <- as.integer(substr(as.Date(data$Date), 6, 7))
+
+data_final <- data[!is.na(data$Invest_ARMANI_lag),]
+```
+
+
+```{r}
+#ARMANI
+model_ARMANI_1 <- lm(Volume_ARMANI ~ Invest_ARMANI + Invest_ARMANI_lag  + seasonality , data = data_final)
+summary(model_ARMANI_1)
+model_ARMANI_2 <- lm(Volume_ARMANI ~ Invest_ARMANI_log + Invest_ARMANI_lag  + seasonality, data = data_final)
+summary(model_ARMANI_2)
+model_ARMANI_3 <- lm(Volume_ARMANI ~ Invest_ARMANI  + Invest_ARMANI_sqr + Invest_ARMANI_lag + seasonality, data = data_final)
+summary(model_ARMANI_3)
+model_ARMANI_4 <- lm(Volume_ARMANI ~ lag_Volume_ARMANI + Invest_ARMANI + Invest_ARMANI_lag + seasonality, data = data_final)
+summary(model_ARMANI_4)
+model_ARMANI_5 <- lm(Volume_ARMANI ~ lag_Volume_ARMANI + Invest_ARMANI_log + Invest_ARMANI_lag + seasonality, data = data_final)
+summary(model_ARMANI_5)
+model_ARMANI_6 <- lm(Volume_ARMANI ~ lag_Volume_ARMANI + Invest_ARMANI  + Invest_ARMANI_sqr + Invest_ARMANI_lag, data = data_final)
+summary(model_ARMANI_6)
+
+Best_ARMANI_4 <- lm(formula = Volume_ARMANI ~ lag_Volume_ARMANI + Invest_ARMANI + 
+    Invest_ARMANI_lag + seasonality, data = data_final)
+summary(Best_ARMANI_4)
+```
+
+
+
+```{r}
+#YSL
+model_YSL_1 <- lm(Volume_YSL ~ Invest_YSL + Invest_YSL_lag  + seasonality, data = data_final)
+summary(model_YSL_1)
+model_YSL_2 <- lm(Volume_YSL ~ Invest_YSL_log + Invest_YSL_lag  + seasonality, data = data_final)
+summary(model_YSL_2)
+model_YSL_3 <- lm(Volume_YSL ~ Invest_YSL  + Invest_YSL_sqr + Invest_YSL_lag + seasonality, data = data_final)
+summary(model_YSL_3)
+model_YSL_4 <- lm(Volume_YSL ~ lag_Volume_YSL + Invest_YSL + Invest_YSL_lag + seasonality, data = data_final)
+summary(model_YSL_4)
+model_YSL_5 <- lm(Volume_YSL ~ lag_Volume_YSL + Invest_YSL_log + Invest_YSL_lag + seasonality, data = data_final)
+summary(model_YSL_5)
+model_YSL_6 <- lm(Volume_YSL ~ lag_Volume_YSL + Invest_YSL  + Invest_YSL_sqr + Invest_ARMANI_lag, data = data_final)
+summary(model_YSL_6)
+
+Best_YSL_4 <- lm(Volume_YSL ~ lag_Volume_YSL + Invest_YSL + Invest_YSL_lag + seasonality, data = data_final)
+summary(Best_YSL_4)
+```
+
+
+
+```{r}
+#LANCOME
+model_LANCOME_1 <- lm(Volume_LANCOME ~ Invest_LANCOME + Invest_LANCOME_lag  + seasonality, data = data_final)
+summary(model_LANCOME_1)
+model_LANCOME_2 <- lm(Volume_LANCOME ~ Invest_LANCOME_log + Invest_LANCOME_lag  + seasonality, data = data_final)
+summary(model_LANCOME_2)
+model_LANCOME_3 <- lm(Volume_LANCOME ~ Invest_LANCOME  + Invest_LANCOME_sqr + Invest_LANCOME_lag + seasonality, data = data_final)
+summary(model_LANCOME_3)
+model_LANCOME_4 <- lm(Volume_LANCOME ~ lag_Volume_LANCOME + Invest_LANCOME + Invest_LANCOME_lag + seasonality, data = data_final)
+summary(model_LANCOME_4)
+model_LANCOME_5 <- lm(Volume_LANCOME ~ lag_Volume_LANCOME + Invest_LANCOME_log + Invest_LANCOME_lag + seasonality, data = data_final)
+summary(model_LANCOME_5)
+model_LANCOME_6 <- lm(Volume_LANCOME ~ lag_Volume_LANCOME + Invest_LANCOME  + Invest_LANCOME_sqr + Invest_LANCOME_lag, data = data_final)
+summary(model_LANCOME_6)
+
+Best_LANCOME_4 <- lm(Volume_LANCOME ~ lag_Volume_LANCOME + Invest_LANCOME + Invest_LANCOME_lag + seasonality, data = data_final)
+summary(Best_LANCOME_4)
+```
+
+
+Optimisation
+```{r}
+#ARMANI
+Monthly_ARMANI_4 <- lm(formula = Volume_ARMANI ~ lag_Volume_ARMANI + Invest_ARMANI + 
+    Invest_ARMANI_lag + seasonality + factor(month), data = data_final)
+summary(Monthly_ARMANI_4) #December Investment is significant (5370)
+weekly_ARMANI_4 <- lm(formula = Volume_ARMANI ~ lag_Volume_ARMANI + Invest_ARMANI + 
+    Invest_ARMANI_lag + seasonality + factor(Weeknumber), data = data_final)
+summary(weekly_ARMANI_4) #December Investment is significant (5370)
+ARMANI_semilog_week <- lm(formula = log_volume_ARMANI ~ Invest_ARMANI + lag_Volume_ARMANI + Invest_LANCOME + seasonality + Price_ARMANI + Invest_YSL + factor(Weeknumber), data = data1)
+summary(ARMANI_semilog_week)
+
+Monthly_YSL_4 <- lm(Volume_YSL ~ lag_Volume_YSL + Invest_YSL + Invest_YSL_lag + seasonality + factor(month), data = data_final)
+summary(Monthly_YSL_4) # 4483
+weekly_YSL_4 <- lm(Volume_YSL ~ lag_Volume_YSL + Invest_YSL + Invest_YSL_lag + seasonality + factor(Weeknumber), data = data_final)
+summary(weekly_YSL_4) # 4483
+
+YSL_log_week <- lm(formula = log_volume_YSL ~ Invest_ARMANI + lag_Volume_YSL + 
+    seasonality + log_price_YSL + Invest_LANCOME + Invest_YSL + 
+    log_price_ARMANI+ factor(Weeknumber), data = data1)
+summary(YSL_log_week)
+
+Monthly_LANCOME_4 <- lm(Volume_LANCOME ~ lag_Volume_LANCOME + Invest_LANCOME + Invest_LANCOME_lag + seasonality + factor(month), data = data_final)
+summary(Monthly_LANCOME_4) #11010
+weekly_LANCOME_4 <- lm(Volume_LANCOME ~ lag_Volume_LANCOME + Invest_LANCOME + Invest_LANCOME_lag + seasonality + factor(Weeknumber), data = data_final)
+summary(weekly_LANCOME_4) #11010
+
+weekly_LANCOME_log <- lm(formula = log_volume_LANCOME ~ Invest_ARMANI + lag_Volume_LANCOME + Invest_LANCOME + seasonality + log_price_YSL + factor(Weeknumber), data = data1)
+summary(weekly_LANCOME_log)
+```
+
+
+```{r}
+lambda_ARMANI <- Best_ARMANI_4$coefficients[2]
+beta1_ARMANI <- Best_ARMANI_4$coefficients[3]
+marg_effect_sr_ARMANI <- beta1_ARMANI
+marg_effect_lr_ARMANI <- beta1_ARMANI/(1-lambda_ARMANI)
+elasticity_sr_ARMANI <- beta1_ARMANI * mean(data_final$Invest_ARMANI) / mean(data_final$Volume_ARMANI)
+elasticity_lr_ARMANI <- (beta1_ARMANI/(1-lambda_ARMANI))*(mean(data_final$Invest_ARMANI) / mean(data_final$Volume_ARMANI))
+
+lambda_YSL <- Best_YSL_4$coefficients[2]
+beta1_YSL <- Best_YSL_4$coefficients[3]
+marg_effect_sr_YSL <- beta1_YSL
+marg_effect_lr_YSL <- beta1_YSL/(1-lambda_YSL)
+elasticity_sr_YSL <- beta1_YSL * mean(data_final$Invest_YSL) / mean(data_final$Volume_YSL)
+elasticity_lr_YSL <- (beta1_YSL/(1-lambda_YSL))*(mean(data_final$Invest_YSL) / mean(data_final$Volume_YSL))
+
+lambda_LANCOME <- Best_LANCOME_4$coefficients[2]
+beta1_LANCOME <- Best_LANCOME_4$coefficients[3]
+marg_effect_sr_LANCOME <- beta1_LANCOME
+marg_effect_lr_LANCOME <- beta1_LANCOME/(1-lambda_LANCOME)
+elasticity_sr_LANCOME <- beta1_LANCOME * mean(data_final$Invest_LANCOME) / mean(data_final$Volume_LANCOME)
+elasticity_lr_LANCOME <- (beta1_LANCOME/(1-lambda_LANCOME))*(mean(data_final$Invest_LANCOME) / mean(data_final$Volume_LANCOME))
+
+marg_effect_sr <- c(marg_effect_sr_ARMANI, marg_effect_sr_YSL, marg_effect_sr_LANCOME)
+marg_effect_lr <- c(marg_effect_lr_ARMANI, marg_effect_lr_YSL, marg_effect_lr_LANCOME)
+elasticity_sr <- c(elasticity_sr_ARMANI, elasticity_sr_YSL, elasticity_sr_LANCOME)
+elasticity_lr <- c(elasticity_lr_ARMANI, elasticity_lr_YSL, elasticity_lr_LANCOME)
+df_marg_ela <- data.frame(marg_effect_sr, marg_effect_lr, elasticity_sr, elasticity_lr)
+row.names(df_marg_ela) <- c("ARMANI", "YSL", "LANCOME")
+kable(df_marg_ela, digits = 4)
+```
+
+
+
+```{r}
+alpha_values <- c(seq(0.01, 0.99, by = 0.001)) #the range of alpha for TV
+adstock_df_ARMANI <- data.frame(Alpha_ARMANI = numeric(0), Rsqr = numeric(0))
+
+for (alpha in alpha_values){
+  
+  data_final$adstock_ARMANI <- numeric(length(data_final$Invest_ARMANI))
+  data_final$adstock_ARMANI[1] <- data_final$Invest_ARMANI[1]
+  
+  for (i in 2:length(data_final$Invest_ARMANI)){
+    data_final$adstock_ARMANI[i] = data_final$Invest_ARMANI[i] + alpha * data_final$adstock_ARMANI[i-1]
+  }
+ 
+    ad_model4 <- lm(formula = Volume_ARMANI ~ adstock_ARMANI + lag_Volume_ARMANI + Invest_ARMANI + Invest_ARMANI_lag + seasonality, data = data_final)
+    adstock_df_ARMANI <- rbind(adstock_df_ARMANI, c(alpha, summary(ad_model4)$adj.r.squared))
+}
+
+colnames(adstock_df_ARMANI) <- c("Alpha",  "Rsqr_ARMANI")
+
+# Best Alpha from the highest adjusted R Square 
+# Alpha : 0.182
+
+alpha_ARMANI <- unlist(adstock_df_ARMANI[which.max(adstock_df_ARMANI$Rsqr_ARMANI),][1])
+print(alpha_ARMANI)
+
+data_final$adstock_ARMANI <- numeric(length(data_final$Invest_ARMANI))
+data_final$adstock_ARMANI[1] <- data_final$Invest_ARMANI[1]
+
+
+for (i in 2:length(data_final$Invest_ARMANI)){
+  data_final$adstock_ARMANI[i] = data_final$Invest_ARMANI[i] + alpha_ARMANI * data_final$adstock_ARMANI[i-1]
+}
+
+ad_model4_ARMANI <- lm(formula = Volume_ARMANI ~ adstock_ARMANI + lag_Volume_ARMANI + Invest_ARMANI + Invest_ARMANI_lag + seasonality, data = data_final)
+
+summary(ad_model4_ARMANI)
+
+png(filename="5.png")
+ggplot(data_final, aes(x=Weeknum, y=Volume_ARMANI, group = 1)) + geom_line(colour="blue") + geom_line(aes(x=Weeknum, y = fitted(ad_model4_ARMANI), group = 1), colour="red")+ theme(legend.position = "top") +labs(title="Fitted vs True", x ="Week", y = "ARMANI Volume")
+dev.off()
+
+png(filename="6.png")
+ggplot(data_final, aes(x=Weeknum, y=adstock_ARMANI, group = 1)) + geom_bar(aes(x=Weeknum, y=Invest_ARMANI),stat="identity", fill="skyblue", colour="blue") + geom_line(colour="red") +  theme(legend.position = "top") +labs(title="Adstock by ARMANI Investment (alpha: 0.182)", x ="Week", y = "ARMANI Adstock")
+dev.off()
+```
+
+
+```{r}
+alpha_values <- c(seq(0.01, 0.99, by = 0.001)) #the range of alpha for TV
+adstock_df_YSL <- data.frame(Alpha_YSL = numeric(0), Rsqr = numeric(0))
+
+for (alpha in alpha_values){
+  
+  data_final$adstock_YSL <- numeric(length(data_final$Invest_YSL))
+  data_final$adstock_YSL[1] <- data_final$Invest_YSL[1]
+  
+  for (i in 2:length(data_final$Invest_YSL)){
+    data_final$adstock_YSL[i] = data_final$Invest_YSL[i] + alpha * data_final$adstock_YSL[i-1]
+  }
+ 
+    ad_model4 <- lm(formula = Volume_YSL ~ adstock_YSL + lag_Volume_YSL + Invest_YSL + Invest_YSL_lag + seasonality, data = data_final)
+    adstock_df_YSL <- rbind(adstock_df_YSL, c(alpha, summary(ad_model4)$adj.r.squared))
+}
+
+colnames(adstock_df_YSL) <- c("Alpha",  "Rsqr_YSL")
+
+# Best Alpha from the highest adjusted R Square 
+# Alpha : 0.168 
+
+alpha_YSL <- unlist(adstock_df_YSL[which.max(adstock_df_YSL$Rsqr_YSL),][1])
+print(alpha_YSL)
+
+data_final$adstock_YSL <- numeric(length(data_final$Invest_YSL))
+data_final$adstock_YSL[1] <- data_final$Invest_YSL[1]
+
+
+for (i in 2:length(data_final$Invest_YSL)){
+  data_final$adstock_YSL[i] = data_final$Invest_YSL[i] + alpha_YSL * data_final$adstock_YSL[i-1]
+}
+
+ad_model4_YSL <- lm(formula = Volume_YSL ~ adstock_YSL + lag_Volume_YSL + Invest_YSL + Invest_YSL_lag + seasonality, data = data_final)
+
+summary(ad_model4_YSL)
+
+png(filename="7.png")
+ggplot(data_final, aes(x=Weeknum, y=Volume_YSL, group = 1)) + geom_line(colour="blue") + geom_line(aes(x=Weeknum, y = fitted(ad_model4_YSL), group = 1), colour="red")+ theme(legend.position = "top") +labs(title="Fitted vs True", x ="Week", y = "YSL Volume")
+dev.off()
+
+png(filename="8.png")
+ggplot(data_final, aes(x=Weeknum, y=adstock_YSL, group = 1)) + geom_bar(aes(x=Weeknum, y=Invest_YSL),stat="identity", fill="skyblue", colour="blue") + geom_line(colour="red") +  theme(legend.position = "top") +labs(title="Adstock by YSL Investment (alpha: 0.168)", x ="Week", y = "YSL Adstock")
+dev.off()
+```
+
+```{r}
+alpha_values <- c(seq(0.01, 0.99, by = 0.001)) #the range of alpha for TV
+adstock_df_LANCOME <- data.frame(Alpha_LANCOME = numeric(0), Rsqr = numeric(0))
+
+for (alpha in alpha_values){
+  
+  data_final$adstock_LANCOME <- numeric(length(data_final$Invest_LANCOME))
+  data_final$adstock_LANCOME[1] <- data_final$Invest_LANCOME[1]
+  
+  for (i in 2:length(data_final$Invest_LANCOME)){
+    data_final$adstock_LANCOME[i] = data_final$Invest_LANCOME[i] + alpha * data_final$adstock_LANCOME[i-1]
+  }
+ 
+    ad_model4 <- lm(formula = Volume_LANCOME ~ adstock_LANCOME + lag_Volume_LANCOME + Invest_LANCOME + Invest_LANCOME_lag + seasonality, data = data_final)
+    adstock_df_LANCOME <- rbind(adstock_df_LANCOME, c(alpha, summary(ad_model4)$adj.r.squared))
+}
+
+colnames(adstock_df_LANCOME) <- c("Alpha",  "Rsqr_LANCOME")
+
+# Best Alpha from the highest adjusted R Square 
+# Alpha : 0.197
+
+alpha_LANCOME <- unlist(adstock_df_LANCOME[which.max(adstock_df_LANCOME$Rsqr_LANCOME),][1])
+print(alpha_LANCOME)
+
+data_final$adstock_LANCOME <- numeric(length(data_final$Invest_LANCOME))
+data_final$adstock_LANCOME[1] <- data_final$Invest_LANCOME[1]
+
+
+for (i in 2:length(data_final$Invest_LANCOME)){
+  data_final$adstock_LANCOME[i] = data_final$Invest_LANCOME[i] + alpha_LANCOME * data_final$adstock_LANCOME[i-1]
+}
+
+ad_model4_LANCOME <- lm(formula = Volume_LANCOME ~ adstock_LANCOME + lag_Volume_LANCOME + Invest_LANCOME + Invest_LANCOME_lag + seasonality, data = data_final)
+
+summary(ad_model4_LANCOME)
+
+png(filename="9.png")
+ggplot(data_final, aes(x=Weeknum, y=Volume_LANCOME, group = 1)) + geom_line(colour="blue") + geom_line(aes(x=Weeknum, y = fitted(ad_model4_LANCOME), group = 1), colour="red")+ theme(legend.position = "top") +labs(title="Fitted vs True", x ="Week", y = "LANCOME Volume")
+dev.off()
+
+png(filename="10.png")
+ggplot(data_final, aes(x=Weeknum, y=adstock_LANCOME, group = 1)) + geom_bar(aes(x=Weeknum, y=Invest_LANCOME),stat="identity", fill="skyblue", colour="blue") + geom_line(colour="red") +  theme(legend.position = "top") +labs(title="Adstock by LANCOME Investment (alpha: 0.197)", x ="Week", y = "LANCOME Adstock")
+dev.off()
+```

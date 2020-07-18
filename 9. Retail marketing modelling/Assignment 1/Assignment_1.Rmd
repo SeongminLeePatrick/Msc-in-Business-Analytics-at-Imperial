@@ -1,0 +1,413 @@
+---
+title: "Retail & Marketing Analytics - Team Assignment 1"
+author: "Franziska Zerwas, Jerry Siah, Jimena Zumaeta, Nirbhay Sharma, Seongmin Lee"
+date: "26 2 2018"
+output:
+    prettydoc::html_pretty:
+    toc: true
+    toc_depth: 2
+    theme: united
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r comment=NA, message=FALSE, warning=FALSE}
+library(dplyr)
+library(readxl)
+library(data.table)
+library(ggplot2)
+library(stringr)
+library(knitr)
+```
+
+# Part 1
+## Pre-processing
+In a first step, the three provided data sets are combined as the account type is still visible in the column "segment_id" and all other columns match. The columns are renamed based on the description provided.    
+Given the KeyLookup file, all possible decodings are made ((sub)interests, device, action_type and segment_id). The key file also provides information about the location code. However, the locations appearing in the data set are not accessible. Therefore, we will use Tableau later to generate some insights from the location codes.  
+In a next step, the masked URLs are removed as well as a potential outlier. We also exclude all rows which only contain NAs (besides the ID and URL).  
+For better interpretation, a short version of the URLs is generated and the time stamp is decoded into years, month and dates.  
+```{r comment=NA, message=FALSE, warning=FALSE}
+options("scipen"=100, "digits"=4)
+
+# load data sets
+account <- read.table("3197_clean.txt", header = FALSE, sep = "\t", fill = TRUE, quote = "")
+account_young <- read.table("3202_clean.txt", header = FALSE, sep = "\t", fill = TRUE, quote = "")
+credit_card <- read.table("3207_clean.txt", header = FALSE, sep = "\t", fill = TRUE, quote = "")
+
+# import keywords
+# subcat <- read_excel("subcategory-kwd.xlsx")
+keylookup <- read_excel("KeyLookup.xlsx")
+
+# combine data sets
+accounts <- rbind(account, account_young, credit_card)
+
+# rename columns
+colnames(accounts) <- c("id", "url", "action_type", "timestamp", "segment_id", "device", 
+                           "hour_range", "location", "campaign_id", "gender", "age_range", 
+                           "int1", "int2", "int3", "sub_int1", "sub_int2", "sub_int3", "value")
+
+# decode interests
+key_interest <- keylookup %>% filter(attribute == "interest") %>% select(attribute_value_label, attribute_value)
+key_interest$attribute_value <- as.integer(key_interest$attribute_value)
+
+accounts <- left_join(accounts, key_interest, by = c("int1" = "attribute_value")) 
+accounts <- left_join(accounts, key_interest, by = c("int2" = "attribute_value")) 
+accounts <- left_join(accounts, key_interest, by = c("int3" = "attribute_value")) 
+
+accounts <- subset(accounts, select = -c(int1, int2, int3))
+setnames(accounts, old = c("attribute_value_label.x", "attribute_value_label.y", "attribute_value_label"), new = c("int1", "int2", "int3"))
+
+# decode sub interests
+key_subinterest <- keylookup%>% filter(attribute == "sub_interest")%>% select(attribute_value_label, attribute_value)
+key_subinterest$attribute_value <- as.integer(key_subinterest$attribute_value)
+
+accounts <- left_join(accounts, key_subinterest, by = c("sub_int1" = "attribute_value")) 
+accounts <- left_join(accounts, key_subinterest, by = c("sub_int2" = "attribute_value")) 
+accounts <- left_join(accounts, key_subinterest, by = c("sub_int3" = "attribute_value")) 
+
+accounts <- subset(accounts, select = -c(sub_int1, sub_int2, sub_int3))
+setnames(accounts, old = c("attribute_value_label.x", "attribute_value_label.y", "attribute_value_label"), new = c("sub_int1", "sub_int2", "sub_int3"))
+
+
+# decode device
+key_device <- keylookup%>% filter(attribute == "device")%>% select(attribute_value_label, attribute_value)
+accounts <- left_join(accounts, key_device, by = c("device" = "attribute_value")) 
+accounts <- subset(accounts, select = -c(device))
+setnames(accounts, old = c("attribute_value_label"), new = c("device"))
+
+# decode location - not used because locations to not match 
+#key_location <- keylookup%>% filter(attribute == "location_region")%>% select(attribute_value_label, attribute_value)
+#test <- accounts %>% mutate(location_short = paste0(substr(location, 1, 2), "-", substr(location, 3, 4)))
+#test <- test %>% select(location_short) %>% unique()
+
+# decode action_type
+accounts <- accounts %>% mutate(action_type2 = ifelse(action_type == "v", "pageview", ifelse(action_type == "i",
+                                  "impression", ifelse(action_type == "c", "click", ifelse(action_type == "e","custom event",NA)))))
+accounts <- subset(accounts, select = -c(action_type))
+setnames(accounts, old = c("action_type2"), new = c("action_type"))
+
+# decode the segment_id
+accounts <- accounts %>% mutate(segment_id2 = ifelse(segment_id == "3197", "account", ifelse(segment_id == "3202", "account young", "credit card")))
+accounts <- subset(accounts, select = -c(segment_id))
+setnames(accounts, old = c("segment_id2"), new = c("segment_id"))
+
+# remove information masked by the adserver 
+accounts <- accounts %>% filter(!grepl("^http://-", url))
+# remove one url which seems to be an outlier: file:///D:/Archivio/Desktop/Banca Masked_Bank - Conto Masked_Bank.html
+accounts <- accounts %>% filter(!grepl("^file:///", url))
+
+# remove NA (if all columns but id/url are NA which is the case the moment int1 is NA)
+accounts <- accounts %>% filter(!int1 == "NA")
+
+# short version of url for better comprehension
+domain <- function(x) strsplit(gsub("http://|https://|www\\.", "", x), "/")[[c(1, 1)]]
+accounts['url_short'] <- sapply(accounts$url, domain)
+
+# decoding of the timestamp
+accounts$year <- substr(as.character(accounts$timestamp), 1, 4)
+accounts$month <- substr(as.character(accounts$timestamp), 5, 6)
+accounts$date <- substr(as.character(accounts$timestamp), 7, 8)
+```
+
+## "Description" Notebook
+Note: Some plots have been generated using Tableau or Python, using the pre-processed data. We only include the resulting plots with a short description. 
+
+### Gender & Age
+As the pie chart below shows, almost three quarter of the IDs are classed with males and only a small fraction of the total scope is assigned to females. We can conclude that no meaningful insights can be generated from the gender given the small fraction of IDs associated to females.  
+Additionally, when we study the demography chart on the right side, we can see that among the IDs which provide assigned ages, the majority falls into the range 35 to 44, followed by the group of 45 to 54. However, it is worth to mention that the age of around 35% of the IDs is unknown, so the age insight should be taken cautiously.
+
+###![](Gender_Ages.png)
+
+
+
+### Interests
+The dataset provides 6 different types of interests: 3 interests and 3 sub interests. These interests were recorded/assigned as the user navigated through and interacted with different web sites. For the sake of this analysis, the main interests were aggregated to identify the most common topics.
+
+###![](All Interests.png)
+
+### Segment ID 
+The bar chart below shows the total number of users acquiring a financial service of either a new account, account young or credit card. As we can see, the total number of users acquiring a new credit card is significantly lower than for the other account types. It is important to keep this in mind for further analysis.   
+
+```{r comment=NA, message=FALSE, warning=FALSE}
+
+# all information available on cookie level 
+test <- accounts %>% select(id, segment_id) %>% unique() %>% group_by(segment_id) %>% count() 
+
+# action type
+ggplot(test, aes(factor(segment_id), y = n)) + geom_bar(stat = "identity", fill = "light blue") + labs(x = "Segment", y = "Count", title = "Number of users by segment id") + theme(axis.text = element_text(angle = 45, hjust = 1)) + guides(fill=guide_legend(title="Action Type"))
+
+```
+
+A closer look at the three given segments shows some interesting differences in terms of action types. According to the 100% stacked bar chart below, customers that open a normal account are more likely to be exposed to online adverts, followed by users opening a young account. Cookies collected from users acquiring a credit card are mostly referring to pageviews and custom events (f.e. filling out online forms).  
+
+```{r comment=NA, message=FALSE, warning=FALSE}
+
+# all information available on cookie level 
+action_types_id <- accounts %>% group_by(segment_id) %>% count(action_type)
+
+# action type
+ggplot(action_types_id, aes(factor(segment_id), y = n, fill = action_type)) + geom_bar(stat = "identity", position = "fill") + labs(x = "Segment", y = "", title = "Proportion of different action types by segment") + theme(axis.text = element_text(angle = 45, hjust = 1)) + guides(fill=guide_legend(title="Action Type"))
+
+```
+
+The bar chart below shows the most common user interests by segment id (excluding the sub interests). Keep in mind that we have fewer users that acquired a credit card than a (young) account. Nevertheless, it can be observed that all users have some main interests in common like properties or technologies. Users acquiring a credit card seem to be very interested in work/education while "account" users are also very interested in economics/finance.  
+
+```{r comment=NA, message=FALSE, warning=FALSE}
+int <- accounts %>% select(id, segment_id, int1, int2, int3) %>% unique()
+int1 <- int %>% group_by(segment_id) %>% count(int1) 
+int2 <- int %>% group_by(segment_id) %>% count(int2) 
+int3 <- int %>% group_by(segment_id) %>% count(int3) 
+int <- full_join(int1, int2, by = c("segment_id" = "segment_id", "int1" = "int2"))
+int <- full_join(int, int3, by = c("segment_id" = "segment_id", "int1" = "int3"))
+int[is.na(int)] <- 0
+int <- int %>% mutate(sum = n + n.x + n.y)
+int <- subset(int, select = -c(n,n.x,n.y))
+int <- int %>% filter(sum >= 15 & segment_id == "account" | sum >= 15 & segment_id == "account young" | sum >= 4 & segment_id == "credit card", int1 != "unknown")
+
+ggplot(int, aes(segment_id, sum, fill = segment_id)) + geom_bar(stat = "identity") + 
+  theme(axis.text = element_text(angle = 45, hjust = 1)) + labs(x = "Segment", y = "Count", title = "Most common interests by segment") +
+  scale_fill_manual("legend", values = c("account" = "blue", "account young" = "orange", "credit card" = "black")) +
+  facet_wrap((~int1)) 
+
+```
+
+Most of the users interested in the credit card are aged between 35 and 44. 
+It seems surprising that the demand for account young products is especially high for the age group > 35. A possible explanation could be that parents are opening bank accounts for their children. 
+
+```{r}
+plot2<- accounts %>% group_by(segment_id, age_range) %>% summarise(n = n()) %>% mutate(portion = n/sum(n))
+plot2$segment_id <- as.factor(plot2$segment_id)
+
+ggplot(data = plot2, aes(plot2$age_range, plot2$n, fill = segment_id)) + geom_bar(stat = 'identity') + labs(x = "Age", y = "Count", title = "Segment ID by age range")
+```
+
+### Traffic Hours
+
+In the chart below, it can be observed how the amount of impressions recorded increases in the afternoon. The peak of the curve is between 3 and 6 pm.
+
+
+###![](Traffic Distribution.png)
+
+
+### Location & Account Types
+The main location with the highest number of impressions registered is Lombardy. Besides that, 5 more cities can be detected that show a relatively high amount of impressions recorded. However, as shown by the green colouring of the graph on the left side, they are marked in lighter green than Lombardy, implying that there is a great gap.  
+
+On the right side of the graph, the same traffic per city is shown but expressed by the acquired account segment. Lombardy shows a different distribution compared to the other cities. We can clearly see that the impression of credit card purchasers is significantly high in Lombardy. In all other cities, account and young account acquiring predominates.  
+
+
+###![](All Maps.png)
+
+### Devices
+The left chart shows that there are 213 distinct devices in the dataset. To be specific, the IDs linked with PC accounts for 72.8%, followed by smartphone with 25.4% and tablet with only 1.9%. The pie graph on the right indicates that most IDs are associated with only one device. This leads to the assumption that only few users have the same ID on different devices and therefore, the same user might be listed under different IDs. 
+
+###![](Devices.png)
+
+In terms of device accessibility, the plot below shows that the number of PCs in the dataset is 4 times higher than the number of smartphones and tablets. We can conclude that users are more likely to purchase a bank product using a laptop/computer. 
+
+```{r}
+plot2<- accounts %>% group_by(segment_id, device) %>% summarise(n = n()) %>% mutate(portion = n/sum(n))
+plot2$segment_id <- as.factor(plot2$segment_id)
+
+ggplot(data = plot2, aes(plot2$device, plot2$n, fill = segment_id)) + geom_bar(stat = 'identity') + labs(x = "Device", y = "Count", title = "By Device Type")
+```
+
+### Action Type
+```{r}
+actiondf <- data.frame()
+uniqueid <- unique(accounts[c('id', 'segment_id', 'gender', 'age_range', 'int1', 'int2', 'int3', 'sub_int1', 'sub_int2', 'sub_int3')])
+actiondf <- data.frame(uniqueid)
+actiondf$segment_id <- as.character(actiondf$segment_id)
+actiondf['bank_pageview'] <- NA
+actiondf['other_pageview'] <- NA
+actiondf['custom_event'] <- NA
+actiondf['click'] <- NA
+actiondf['impression'] <- NA
+
+for (index in 1:nrow(actiondf)){
+  userdf <- subset(accounts, id == actiondf$id[index])
+  actiondf[index, "bank_pageview"] <- sum(userdf$action_type == "pageview" & str_detect(userdf$url, "masked_bank"))
+  actiondf[index, "other_pageview"] <- sum(userdf$action_type == "pageview" & !str_detect(userdf$url, "masked_bank"))
+  actiondf[index, "bank_custom_event"] <- sum(userdf$action_type == "custom event" & str_detect(userdf$url, "masked_bank"))
+  actiondf[index, "click"] <- sum(userdf$action_type == "click")
+  actiondf[index, "impression"] <- sum(userdf$action_type == "impression")
+}
+```
+
+
+
+```{r}
+ggplot(actiondf, aes(x = bank_pageview, fill = segment_id)) + geom_histogram(binwidth=10, alpha=.5, position = "dodge") + labs(title = "Histogram on Pageviews on Bank Websites", x = "Pageviews on Bank Websites", y = "Number of Users")
+```
+
+Most users of all account types completed their transactions on the bank website within 10 pageviews. A possible interpretation could be a straight-forward and simple process in signing up for a new accounts or credit card. Users did not need to navigate through too many pages to search for information before signing up to new accounts.  
+
+```{r}
+ggplot(actiondf, aes(x = other_pageview, fill = segment_id)) + geom_histogram(binwidth=20, alpha=.5, position = "dodge") + labs(title = "Histogram on Pageviews on Other (Non-Bank) Websites", x = "Pageviews on Other (Non-Bank) Websites", y = "Number of Users")
+```
+
+Most IDs of all accounts have not been tracked visiting other websites before signing up for a new account.
+
+```{r}
+ggplot(actiondf, aes(x = bank_custom_event, fill = segment_id)) + geom_histogram(binwidth=10, alpha=.5, position = "dodge") + labs(title = "Histogram on Custom Events Action Type on Bank Website",x = "Number of Custom Events Action Type on Bank Website", y = "Number of Users")
+```
+
+Most users of all account types completed their transactions on the bank websites in only a few event actions. It confirms the earlier analysis on pageviews. Users can complete their transactions such as signing up for new accounts in only a few steps.
+
+```{r}
+ggplot(actiondf, aes(x = click, fill = segment_id)) + geom_histogram(binwidth = 1, alpha=.5, position = "dodge") + labs(title = "Histogram on Clicks",x = "Number of Clicks", y = "Number of Users")
+```
+
+Most users for all account types have not clicked on any advertisements. The advertisements might have been top-of-brand-recall messages instead of call-to-action messages. However, we should also keep in mind that the total number of click actions is very low in the provided data. 
+
+```{r}
+ggplot(actiondf, aes(x = impression, fill = segment_id)) + geom_histogram(binwidth=20, alpha=.5, position = "dodge") + labs(title = "Histogram on Impressions",x = "Number of Impressions", y = "Number of Users")
+```
+
+As most IDs do not correspond to a long navigation through the internet, most users did not see any advertisement.
+
+### Campaign
+```{r comment=NA}
+campaign <- accounts %>% count(campaign_id, sort=TRUE)
+campaign <- subset(campaign, campaign_id != "")
+head(campaign, 10)
+```
+
+```{r}
+campaign_top <- subset(campaign, n > 54)
+campaign_top <- campaign_top[order(campaign_top$n),]
+ggplot(campaign_top, aes(x = reorder(campaign_id, -n), y = n)) + geom_bar(stat = "identity", colour="black", fill="pink")  + labs(title = "Number of Impressions by Campaign ID",x = "Campaign IDs", y = "Number of Impressions")
+
+```
+
+Advertisements under campaign ID 20528092 and 20640719 were viewed the most by users who signed up for new accounts.  The other campaigns dwarf in comparison to the two campaigns.
+
+# Part 2
+## Business Question 1
+
+*Can we identify different the target groups for each account type based on the data provided and how can we target the identified groups?*
+
+The descriptive analysis in part 1 provided many interesting insights about the users purchasing different products on the bank website. This information could be used for more specified campaigns and target marketing.  
+
+The analysis of the coherence between age and acquisition of different financial services showed two important target groups. Firstly, purchasers of credit cards are most likely aged between 35 and 44 which is the age group associated with a demand for financial consumption and secure occupations. Secondly, young accounts are mostly acquired by consumers > 35 years which leads to the assumption that parents open bank accounts for their children. Therefore, from a target marketing perspective, the commercial campaigns should be matched up with the guardians' interests.
+
+Another important observation is the fact, that financial service acquisition is most likely done via a PC. Especially, the consumers creating a credit card are dominantly linked with PCs. 
+Thus, to catch the attention paid by the adulthood (35 ??? 44), any attempt of campaign must have some component related to credit cards and addressed selectively to the PC users.  
+
+In terms of user interests, technology, real-estate and economic topics appear on top for every type of account client (see plot below). The topics seem reasonable if we consider that most users are adults in their late 30s that are either opening accounts, credit cards or accounts for their children. This group will not deviate easily with advertising beyond their focus of interest.
+
+###![](Interests by Account.png)
+
+Considering the locations in the dataset, the most impression records in the dataset are registered in Lombardy, the only city with significant presence of all 3 types of accounts. In all other cities, the majority is accumulated to young account and account users. A possible strategy could be to use different campaigns for the cities, e.g. targeting credit card users in Lombardy and for example account users in Veneto. Moreover, the bank could consider focusing on the regions with the main demand. 
+
+Concluding with the second part of the question on how to target the identified groups, we propose to possible approaches:  
+
+1. Personalized advertising:  
+Advertisement should be mostly related to the identified interests of our main consumer: adults in their late 30s. Furthermore, campaigns should focus on PC users, given our previous findings.   
+
+2. Event Sponsorships:  
+The bank could start associating its brand name with other brands that are important for the consumer according to her interests. For example, the bank could associate with a real estate company to make an expo on art-deco and motivate the users that attend this event to sign up or explore possible financing options through the bank.
+
+## Business Question 2
+
+*Which online advertising campaigns are effective and how can we leverage on our ability to gather data from the internet to track the effectiveness of our campaigns in other channels?*
+
+First, we want to analysis what the dataset provides that could help us to gauge the effectiveness of the banks online campaigns. Knowing which campaigns were effective could help to craft future online campaigns and to improve their effectiveness further. We assume that as advertisement consultants we have additional knowledge about which campaign IDs belong to the bank.   
+
+Analysing the campaign IDs of the impressions shown to new account holders will allow us to know which of our campaigns may have influenced such customers in signing up for new accounts or credit cards with the bank. From our early analysis of the campaign IDs, 2 campaign IDs (20528092 and 206410719) have been identified that stood out prominently among the top 8 campaign IDs.  We carry out further analysis of the top 4 campaign IDs (20528092, 206410719, 20545500 and 11070875). The number of impressions of these 4 campaign IDs is plotted respectively over the entire period of the campaigns.  For better clarity, campaign IDs 20545500 and 11070875 have been removed from the final plot below as both dwarf in comparison to the number of impressions by campaign IDs 20528092 and 206410719.
+
+```{r comment=NA}
+datetime <- as.POSIXlt(as.character(accounts$timestamp), format="%Y%m%d%H%M%S")
+accounts$datetime <- datetime
+datedata <- format(as.POSIXct(strptime(as.character(accounts$timestamp),"%Y%m%d%H%M%S",tz="")) ,format = "%Y-%m-%d")
+accounts$date <- datedata
+date <- unique(datedata)
+actiondate <- data.frame(date)
+actiondate['bank_pageview'] <- NA
+actiondate['other_pageview'] <- NA
+actiondate['custom_event'] <- NA
+actiondate['click'] <- NA
+actiondate['campaign_20528092'] <- NA
+actiondate['campaign_20640719'] <- NA
+actiondate['campaign_20545500'] <- NA
+actiondate['campaign_11070875'] <- NA
+
+for (index in 1:nrow(actiondate)){
+  datedf <- subset(accounts, date == actiondate$date[index])
+  actiondate[index, "bank_pageview"] <- sum(datedf$action_type == "pageview" & str_detect(datedf$url, "masked_bank"))
+  actiondate[index, "other_pageview"] <- sum(datedf$action_type == "pageview" & !str_detect(datedf$url, "masked_bank"))
+  actiondate[index, "bank_custom_event"] <- sum(datedf$action_type == "custom event" & str_detect(datedf$url, "masked_bank"))
+  actiondate[index, "click"] <- sum(datedf$action_type == "click")
+  actiondate[index, "impression"] <- sum(datedf$action_type == "impression")
+  actiondate[index, "campaign_20528092"] <- sum(datedf$campaign_id == "20528092", na.rm = TRUE)
+  actiondate[index, "campaign_20640719"] <- sum(datedf$campaign_id == "20640719", na.rm = TRUE)
+  actiondate[index, "campaign_20545500"] <- sum(datedf$campaign_id == "20545500", na.rm = TRUE)
+  actiondate[index, "campaign_11070875"] <- sum(datedf$campaign_id == "11070875", na.rm = TRUE)
+}
+
+actiondate <- setorder(actiondate, date)
+
+dat = melt(subset(actiondate, select = c("bank_pageview","bank_custom_event", "campaign_20528092", "campaign_20640719", "date")), id.vars = "date")
+ggplot(aes(x = date, y = value, color = variable, group = variable), data = dat) + geom_point() + geom_line() +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  
+  labs(title = "Actions and Impressions over Time", x = "Dates", y = "Number of Actions")
+```
+
+The plot above and the data show that campaign 20640719 started on 16 Jan 2018 after campaign 20528092 ended on 14 Jan 2018.  We can see that the number of pageviews and custom events on the bank website increased over time, peaking close to the end of campaign 20528092. The number of pageviews remained high after campaign 20528092 ended. However, some drops can be observed. We conclude that campaign 20528092 might have been more effective than campaign 20640719.  
+(Note that we assume that both campaigns were carried out by the bank. As mentioned earlier, if we were bank marketing executives, we would have known whether the campaigns were carried out by us.)   
+
+Further analysis is carried out by examining regression models for bank pageviews and custom events (on the bank website) on each campaign over the period of the respective campaign.
+
+```{r comment=NA}
+campaignstudy <- subset(actiondate, as.Date(actiondate$date) <= "2018-01-14")
+campaign_pageview <- lm(bank_pageview ~ campaign_20528092 + campaign_20640719 + campaign_20545500 + campaign_11070875, data = campaignstudy)
+summary(campaign_pageview)
+```
+
+```{r comment=NA}
+campaign_event <- lm(bank_custom_event ~ campaign_20528092 + campaign_20640719 + campaign_20545500 + campaign_11070875, data = campaignstudy)
+summary(campaign_event)
+```
+
+The linear regression models confirm that campaign 20528092 is positively correlated and statisically significant to the increase in pageviews and custom events on the bank website.  Given that an increase of impressions by campaign 20528092 leads to more pageviews and custom events on the bank website c.p., we conclude that campaign 20528092 has been effective in getting new customers interested in the banks' products and eventually in signing up for new accounts or new credit cards.  
+
+Further analysis could be conducted by grouping the pageviews and custom events according to the segment ID to receive a more detailed analysis of the campaign effectiveness over the different account types. Knowing which campaign was more effective will allow for better planning in regard of future campaigns.  
+
+Online campaigns are only one advertising media. With the ability to track the customers' activities online, we could devise a way to track the effectiveness of our advertising campaigns on other channels such as print (newspapers, flyers, magazines, etc.), outdoor (billboards, LED screens, etc.), broadcast (radio, audio streaming, etc.) and ground executions (roadshows, booths, exhibitions, etc.).  Although, most of the tracking of these non-online advertising campaigns must be done native to the chosen channels, we could give different bank URLs or promotional codes for different channel/media campaigns respectively.  In this way, we could gauge the effectiveness of each channel/media when the customers access the bank website via the different URLs or promotional codes depending on the channels in which they have been "touched" by our advertising campaigns.
+
+
+# Part 3
+## 1. Validity of the available data
+The data provided contains only a small subset of the available data on the DMP (~ 200 IDs) which limits any kind of analysis. For example, we only have access to 16 IDs connected to females. However, even with access to the whole dataset, we would still deal with some limitations concerning the validity:  
+
+First, many users have access to more than one device with different user identifiers. Also, there might be groups that use the same device together, e.g. families. Therefore, more IDs could refer to the same user or one ID could refer to more than one user. This might distort the algorithms that are detecting demographics and interests as well as the descriptive statistic on different target groups.  
+
+Moreover, time pays a pivotal role. The dataset only consists data from a small time period which restricts any analysis of performance measurement e.g. of ad campaigns, to a small time window. Important long term insights could be missed. On the other hand, data should be analysed closely to the implementation of marketing strategies to avoid a lag in performance measurement. Limits in storage might also influence the availability of past data. This trade off does limit the validity of the data further. 
+
+## 2. Lack of information on customer journey  
+Analysing the customer behaviour and patterns is paramount for successful business, in this case the bank. Getting to know the way your customers interact with your website and how they react to design changes will allow us to improve UX. There are two aspects of customer journey that we cannot identify using the current data set - the customer journey to the bank webpage, and the user (or customer) experience on our website.  
+
+1. *Customer journey to our website:*  
+To track the customer journey means understanding which pages (of relevance) the customer visits before landing on our website. For the bank, this is of vital importance as it allow us to analyse our direct competitors. Using this, we can implement a preferential pricing model for customers and generate more business.
+
+2. *User experience on our website:*  
+There are two specific indicators that are central to assessing UX on web pages - ‘bounce rate’ and ‘exit rate’.
+Bounce rate is the percentage of people who have landed on a page and left the website immediately. With the bounce rate, we can understand the effectiveness of our landing/information page. A high bounce rate indicates to the UX not being effective. Exit rate is the percentage of people who have left the website from that webpage. In the case of custom events, where we are taking the user through a custom process, looking at the exit rate can help us identify the problems with the UX and generate more traction.  
+The absence of data on these two indicators does not allow us to predict effectiveness of the campaigns and thus loose potential customers and business.
+
+## 3. Inconsistencies within the data
+Despite the dataset being of reasonable size, we still are unable to see real granular level data due to several inconsistencies in the dataset. The following are few of the things we feel would certainly enrichen the dataset if included:
+
+1. Additional information about 'action types': even though we have information about action types, we do not always 'know' what they really mean. This is the case for the action type 'e' (custom event). Since we have no information on what this custom event entails, we cannot understand its significance or interpretation. All we can infer is that the customer went through a custom user/process flow.  
+
+2. Cookie data not complete with information: Due to several websites being a 'walled garden', we cannot get the complete and reliable picture regarding the interests of the customers. We must rely on algorithms to predict user demographics which may not be accurate.  
+
+3. Missing information due to NA: within the dataset, we have several NAs which creates an issue of data sanctity and removes almost 4000 from the analysis.  
+
+4. Description of URLs: Majority of the URLs that are captured are ambiguous and do not give us any information about the user process. A lack of description of these URLs makes them useless for analysis and only adds noise to the database.  
+
+Having data without these issues will gives us a more complete picture of what is happening, allowing us to map customer behaviour better and provide meaningful insights. 

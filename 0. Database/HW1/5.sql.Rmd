@@ -1,0 +1,85 @@
+---
+title: "5.sql"
+author: "Seongmin Lee"
+date: "2017³â 10¿ù 14ÀÏ"
+output: html_document
+---
+
+```{r}
+library(RPostgreSQL)
+password <- .rs.askForPassword("You database password.")
+drv <- dbDriver("PostgreSQL")
+con <- dbConnect(drv, dbname = "postgres",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = password)
+remove(password)
+```
+
+If you have trouble running the above:
+
+* run pgAdmin III (or pgAdmin 4) and connect to a database (Server),
+* check settting (username, passowrd, port, host) and update if needed.
+
+If you are still experiencing problems, use http://rextester.com/FNZM18030.
+
+```{sql, connection=con}
+DROP TABLE IF EXISTS staff;
+DROP TABLE IF EXISTS dept;
+
+CREATE TABLE staff (
+  id         integer PRIMARY KEY,
+  name       text,
+  surname    text,
+  salary     numeric,
+  dept_id    integer,
+  start_date date,
+  boss_id    integer);
+
+CREATE TABLE dept (
+  id         integer PRIMARY KEY,
+  name       text,
+  floor      integer,
+  colour     text);
+
+INSERT INTO staff
+  (id, name, surname, salary, dept_id, start_date, boss_id)
+VALUES
+  (121, 'Margarita', 'Anderson', 2600, 1, '2016-07-01', 167),
+  (122, 'Cindy', 'Pena', 2950, 2, '2015-01-01', 516),
+  (123, 'Geneva', 'Love', 5125, 3, '2016-07-01', 516),
+  (124, 'Ramona', 'Harper', 3100, 4, '2016-07-01', 169),
+  (165, 'Kelli', 'Lawrence', 4700, 3, '2016-01-01', 312),
+  (166, 'Curtis', 'Russell', 2100, 1, '2015-01-01', 516),
+  (167, 'Elsie', 'Pierce', 6000, 3, '2016-07-01', 312),
+  (168, 'Judith', 'Lamb', 3300, 1, '2015-01-01', 169),
+  (169, 'Julio', 'Tucker', 4700, 2, '2016-07-01', 312),
+  (210, 'Aaron', 'Cortez', 3800, 1, '2016-01-01', 165),
+  (311, 'Dora', 'Marsh', 3450, 4, '2015-01-01', 212),
+  (312, 'Ed', 'Vasquez', 8600, 3, '2016-07-01', 199),
+  (413, 'Annie', 'Chapman', 3600, 2, '2015-01-01', 516),
+  (414, 'Isaac', 'Cunningham', 2750, 1, '2016-07-01', 516),
+  (415, 'Fredrick', 'Mullins', 5100, 3, '2016-01-01', 212),
+  (516, 'Eddie', 'Patterson', 4500, 2, '2015-07-01', 500),
+  (517, 'Myron', 'Matthews', 3200, 4, '2016-01-01', 165),
+  (518, 'Ruby', 'Rowe', 3900, 1, '2016-01-01', 312),
+  (519, 'Delores', 'Hines', 3950, 2, '2015-01-01', 165),
+  (520, 'Robyn', 'Patton', 3400, 2, '2016-01-01', 516);
+
+INSERT INTO dept
+  (id, name, floor, colour)
+VALUES
+  (1, 'Human Resources', 0, 'blue'),
+  (2, 'Management', 1, 'red'),
+  (3, 'IT', 4, 'red'),
+  (4, 'Marketing', 2, 'blue'),
+  (5, 'Maintenance', 1, 'blue');
+```
+
+
+```{sql, connection=con}
+SELECT s.name, s.surname, s.boss_id
+FROM staff AS s
+LEFT JOIN staff AS bosses
+ON s.boss_id = bosses.id
+WHERE bosses.boss_id IS NULL
+```

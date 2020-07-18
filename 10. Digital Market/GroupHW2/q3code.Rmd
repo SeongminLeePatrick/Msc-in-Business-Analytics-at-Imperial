@@ -1,0 +1,124 @@
+---
+title: "R Notebook"
+output:
+  html_document: default
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+options(scipen = 999)
+library(readxl)
+library(forecast)
+library(dplyr)
+library(caret)
+library(glmnet)
+library(kableExtra)
+library(zoo)
+library(randomForest)
+library(ggplot2)
+library(ggthemes)
+library(e1071)
+library(data.table)
+library(car)
+library(nortest)
+```
+
+```{r echo=FALSE}
+df = read_xlsx("AB_HW2.xlsx", sheet = 2)
+df$callconversion <- df$calls/df$pageviews
+df$resconversion <- df$reservations/df$pageviews
+summary(df$treatment)
+```
+
+## Introduction
+http://www.sthda.com/english/wiki/unpaired-two-samples-wilcoxon-test-in-r
+
+Conversion rate is more important than pure pageviews because restaurants would want action taken to make money and would pay accordingly for higher conversion rates. It could be that the new ad design brings in more clicks but lesser convesions, making it less effective in the eyes of the restaurants, the paying customers of Yelp-style site. Furthermore, pageviews without impressions does not make sense as the number of impressions could have been different. 
+
+We thought of doing a one-way ANOVA test. However, the assumptions of homogeneity of variance and normality are violated according to the levene test and Anderson-Darling normality test below (p-values of less than 0.01).
+
+```{r echo=FALSE}
+df$treatment <- as.factor(df$treatment)
+```
+
+
+```{r}
+leveneTest(callconversion ~ treatment, data = df)
+leveneTest(resconversion ~ treatment, data = df)
+# Extract the residuals
+res.aov <- aov(callconversion ~ treatment, data = df)
+aov_residuals <- residuals(object = res.aov)
+res.aov1 <- aov(resconversion ~ treatment, data = df)
+aov_residuals1 <- residuals(object = res.aov1)
+# Run Anderson-Darling
+ad.test(aov_residuals)
+ad.test(aov_residuals1)
+```
+
+Given that one-way ANOVA assumptions are violated, we would do a Kruskal-Wallis rank sum test, which is the non-parametric alternative of one-way ANOVA.
+```{r}
+kruskal.test(callconversion ~ treatment, data = df)
+kruskal.test(resconversion ~ treatment, data = df)
+```
+As the p-value is less than the significance level 0.01, we can conclude that there are significant differences between the 3 treatment groups for both conversion rates.
+
+## Comparing call and reservation conversion rates between treatment 1 and 2
+
+The reason for doing so is because we want to know whether the new ad design was more effective in terms of conversion rates compared to the current ad design, especially if the new ad design was more relevant than the current ad design such that conversion increases.
+
+We would use the two-samples Wilcoxon rank sum test, which is a non-parametric statistical hypothesis test used to compare independent groups of samples to assess whether their population mean ranks differ, which is an alternative to the t-test since the population is not normally distributed.
+
+```{r echo=FALSE}
+df2 <- df[df$treatment!=0,]
+```
+
+
+```{r}
+wilcox.test(callconversion ~ treatment, data = df2, alternative = "less")
+
+wilcox.test(resconversion ~ treatment, data = df2, alternative = "less")
+```
+
+Looking at the results of the 2 tests, both with alternative hypothesis that the median of treatment 1 is less than the median of treatment 2, we see that the p-value is less than 0.01. This means we can reject the null hypothesis in favor of the alternative hypothesis at the 1% significance level. This means that the new ad design is more effective than the current ad design for both conversion rates.
+
+
+## Comparing call and reservation conversion rates between treatment 0 and 2
+
+Treatment 0 is the one with no advertisements (i.e. purely from organic search). It could be possible that the new ad design was not statistically better than having no advertisements. Then, the ad design would be ineffective and restaurant would be better off not paying the Yelp-style site.
+
+```{r}
+df3 <- df[df$treatment!=1,]
+
+wilcox.test(callconversion ~ treatment, data = df3, alternative = "less")
+
+wilcox.test(resconversion ~ treatment, data = df3, alternative = "less")
+```
+Looking at the results of the 2 tests, both with alternative hypothesis that the median of treatment 0 is less than the median of treatment 2, we see that the p-value is less than 0.01. This means we can reject the null hypothesis in favor of the alternative hypothesis at the 1% significance level. This means that the new ad design is more effective than the having no ad for both conversion rates.
+
+## Comparing call and reservation conversion rates between treatment 1 and 2 by restaurant type
+
+Now, we want to see if the new ad design was more effective in terms of conversion rates compared to the current ad design if we differentiated by restaurant types. It could be that it could only be effective for one type.
+
+```{r echo=FALSE}
+df4 <- df2[df2$restaurant_type=='chain',]
+df5 <- df2[df2$restaurant_type=='independent',]
+```
+
+For chain restaurants
+```{r}
+wilcox.test(callconversion ~ treatment, data = df4, alternative = "less")
+
+wilcox.test(resconversion ~ treatment, data = df4, alternative = "less")
+```
+
+For independent restaurants
+```{r}
+wilcox.test(callconversion ~ treatment, data = df5, alternative = "less")
+
+wilcox.test(resconversion ~ treatment, data = df5, alternative = "less")
+```
+Looking at all 4 tests above, both with alternative hypothesis that the median of treatment 1 is less than the median of treatment 2, we see that the p-value is less than 0.01, we see that the p-value is less than 0.01 for all 4 tests. This means we can reject the null hypothesis again in favor of the alternative hypothesis at the 1% significance level. The new ad design is more effective than the current ad design for both conversion rates regardless of restaurant type.
+
+

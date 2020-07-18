@@ -1,0 +1,81 @@
+---
+title: "Problem Set"
+author: Seongmin Lee, CID 01247436
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+
+library(leaps)
+library(car)
+library(sandwich) 
+library(lmtest)
+library(stargazer)
+```
+
+```{r echo=TRUE, include=FALSE}
+s_and_s <- read.csv('Dataset/2016-07-metropolitan-stop-and-search.csv')
+head(s_and_s)
+```
+
+```{r echo=TRUE, include=FALSE}
+data2 <- data[ , -which(names(data) %in% c("lnOpening.Gross", "Global.Gross", 'Global.ROI'))]
+
+# stepwise search 
+lnglobal_gross.null <- lm(lnGlobal.Gross ~ 1, data2)
+lnglobal_gross.full <- lm(lnGlobal.Gross ~ ., data2)
+
+step(lnglobal_gross.null, scope = list(lower = lnglobal_gross.null, upper =  lnglobal_gross.full), direction = "forward")
+model1 <- lm(formula = lnGlobal.Gross ~ lnBudget + Sequel + Critics.Opinion + 
+    Opening.Theatres + Oscar.Nominations, data = data2)
+summary(model1) #Adjusted R-squared:  0.5854
+
+step(lnglobal_gross.full, data2, direction = "backward") 
+model2 <- lm(formula = lnGlobal.Gross ~ Opening.Theatres + Sequel + Summer + 
+    Holiday + Christmas + Critics.Opinion + Oscar.Nominations + 
+    lnBudget, data = data2)
+summary(model2) #Adjusted R-squared:  0.5936 (selected)
+
+step(lnglobal_gross.null, scope = list(lower = lnglobal_gross.null, upper = lnglobal_gross.full), direction = "both")
+model3 <- lm(formula = lnGlobal.Gross ~ lnBudget + Sequel + Critics.Opinion + 
+    Opening.Theatres + Oscar.Nominations, data = data2)
+summary(model3) #Adjusted R-squared:  0.5854 
+```
+
+```{r echo = FALSE, message=FALSE, warning=FALSE, results='asis'}
+stargazer(model2, title = "6. Global Gross Regression Model on log(Global Gross)",type = "latex", header = FALSE)
+```
+
+
+```{r echo=TRUE, include=FALSE}
+data3 <- data[ , -which(names(data) %in% c("lnOpening.Gross", "Global.Gross","lnGlobal.Gross"))]
+
+# stepwise search 
+globalroi.null <- lm(Global.ROI ~ 1, data3)
+globalroi.full <- lm(Global.ROI ~ ., data3)
+
+step(globalroi.null, scope = list(lower = globalroi.null, upper =  globalroi.full), direction = "forward")
+
+model1 <- lm(formula = Global.ROI ~ Sequel + Critics.Opinion + lnBudget + 
+    Opening.Theatres + Oscar.Nominations, data = data3)
+summary(model1) #Adjusted R-squared:  0.3279 (selected)
+
+step(globalroi.full, data3, direction = "backward") 
+model2 <- lm(formula = Global.ROI ~ Opening.Theatres + Sequel + Critics.Opinion + 
+    Oscar.Nominations + lnBudget, data = data3)
+summary(model2) # Adjusted R-squared:  0.3279 (selected)
+
+step(globalroi.null, scope = list(lower = globalroi.null, upper = globalroi.full), direction = "both")
+model3 <- lm(formula = Global.ROI ~ Sequel + Critics.Opinion + lnBudget + 
+    Opening.Theatres + Oscar.Nominations, data = data3)
+summary(model3) # Adjusted R-squared:  0.3279 (selected)
+```
+
+```{r echo = FALSE, message=FALSE, warning=FALSE, results='asis'}
+stargazer(model2, title = "7. Choice of DV Regression Model on log(Global Gross)", type = "latex", header = FALSE)
+```
+
+

@@ -1,0 +1,117 @@
+---
+title: "Untitled"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(tseries)
+library(lubridate)
+```
+
+```{r}
+setwd("~/00. Spring/01. Retail Marketing/Assessment/Team2")
+
+# read data
+data <- read_excel("DB_CarQuotes_Weekly_RMA.xlsx", sheet = 1)[-c(100:116),]
+summary(data)
+
+# decode date column
+# data['Week'] <- as.Date(as.numeric(data$Week), origin = "1899-12-30")
+
+# transform to numeric variables
+cols = c("Lead Brochure Car1+NewCar1", "Lead Quotation Car1+NewCar1", "Lead TD Car1+NewCar1", 
+         "Investment ON Car1", "Investment TV Car1 Copy1", "Investment TV Car1 Copy2", 
+         "Investment TV Car1 Copy3", "Investment TV Car1 Copy4")    
+data[,cols] = apply(data[,cols], 2, function(x) as.numeric(x))
+
+# create time series for orders & quotations to extract seasonality + trend
+# we use freq = 4 to detect any patterns from month to month (approx.)
+ts_orders <- ts(data$`Orders Car1+NewCar1`, frequency = 4)
+plot(stl(ts_orders,'periodic'))
+
+ts_quotation <- ts(data$`Quotations Car1+NewCar1`, frequency = 4)
+plot(stl(ts_quotation,'periodic'))
+
+# introduce a lag variable for Quotations and Orders
+data$lag.quotations <- c(NA, head(data$`Quotations Car1+NewCar1`, -1))
+data$lag.orders <- c(NA, head(data$`Orders Car1+NewCar1`, -1))
+
+# create new variable of total investment / Total GRP radio
+data <- data %>% mutate("TOT Investment Radio" = `Investment Radio 1`+`Investment Radio 2`+`Investment Radio 3`,
+                        "GRP Radio" = `GRP RADIO 1` + `GRP RADIO 2` + `GRP RADIO 3`)
+
+
+# create a new variable "Other Offline Activities"
+data <- data %>% mutate("Other Offline Activities" = `Investment OFF Car1` - `TOT Investment Radio` - `Investment TV Car1`)
+```
+
+## Adstock
+```{r}
+alpha.values.tv <- c(seq(0.01, 0.99, by = 0.01)) #the range of alpha for TV
+alpha.values.radio <- c(seq(0.01, 0.99, by = 0.01)) #the range of alpha for Radio
+adstock.df.GRP <- data.frame(Alpha_TV = numeric(0), Alpha_Radio = numeric(0),Rsqr = numeric(0))
+
+#By changing the alphas, build models
+for (alpha.tv in alpha.values.tv){
+  
+  data$GRP.TV.adstock <- numeric(length(data$`GRP TV Car1`))
+  data$GRP.TV.adstock[1] <- data$`GRP TV Car1`[1]
+  
+  for (i in 2:length(data$`GRP TV Car1`)){
+    data$GRP.TV.adstock[i] = data$`GRP TV Car1`[i] + alpha.tv * data$GRP.TV.adstock[i-1]
+  }
+  for (alpha.radio in alpha.values.radio){
+    data$GRP.Radio.adstock <- numeric(length(data$`GRP Radio`))
+    data$GRP.Radio.adstock[1] <- data$`GRP Radio`[1]
+    
+    for (i in 2:length(data$`GRP Radio`)){
+      data$GRP.Radio.adstock[i] = data$`GRP Radio`[i] + alpha.radio * data$GRP.Radio.adstock[i-1]
+    }  
+    GRP.m3 <- lm(`Quotations Car1+NewCar1` ~ GRP.TV.adstock + GRP.Radio.adstock +
+                               `Dummy August` + `Dummy Holidays` + 
+                               `Dummy NewCar1 Full Launch` + 
+                               `Dummy OpenDoors Car1` + 
+                               `Dummy OpenDoors Launch NewCar1` +
+                               `Dummy RunOut Car1` , data = data)
+    adstock.df.GRP <- rbind(adstock.df.GRP, c(alpha.tv, alpha.radio, summary(GRP.m3)$adj.r.squared))
+  }
+}
+
+colnames(adstock.df.GRP) <- c("Alpha_TV", "Alpha_Radio", "Rsqr")
+
+# Best Alpha from the highest adjusted R Square 
+# Alpha_TV : 0.39
+# Alpha_Radio : 0.91
+GRP.alpha <- adstock.df.GRP[which.max(adstock.df.GRP$Rsqr),]
+GRP.tv.alpha <- unlist(GRP.alpha[1])
+GRP.radio.alpha <- unlist(GRP.alpha[2])
+
+data$GRP.TV.adstock <- numeric(length(data$`GRP TV Car1`))
+data$GRP.TV.adstock[1] <- data$`GRP TV Car1`[1]
+
+data$GRP.Radio.adstock <- numeric(length(data$`GRP Radio`))
+data$GRP.Radio.adstock[1] <- data$`GRP Radio`[1]
+
+for (i in 2:length(data$GRP.TV.adstock)){
+  data$GRP.TV.adstock[i] = data$`GRP TV Car1`[i] + GRP.tv.alpha * data$GRP.TV.adstock[i-1]
+  data$GRP.Radio.adstock[i] = data$`GRP Radio`[i] + GRP.radio.alpha * data$GRP.Radio.adstock[i-1]
+}
+data$tv.radio.adstock = data$GRP.TV.adstock + data$GRP.Radio.adstock
+GRP.m3.final <- lm(`Quotations Car1+NewCar1` ~ GRP.TV.adstock + GRP.Radio.adstock+
+                             `Dummy August` + `Dummy Holidays` + 
+                             `Dummy NewCar1 Full Launch` + 
+                             `Dummy OpenDoors Car1` + 
+                             `Dummy OpenDoors Launch NewCar1` + 
+                             `Dummy RunOut Car1` , data = data)
+
+summary(GRP.m3.final)
+ggplot(data, aes(x=`Week Number`, y=`Quotations Car1+NewCar1`, group = 1)) + geom_line(colour="blue") + geom_line(aes(x=`Week Number`, y = fitted(GRP.m3), group = 1), colour="red")+ theme(legend.position = "top") +labs(title="Fitted vs True", x ="Week", y = "Quotation Car1+NewCar1")
+
+ggplot(data, aes(x=`Week Number`, y=`GRP.TV.adstock`, group = 1)) + geom_bar(aes(x=`Week Number`, y=`GRP TV Car1`),stat="identity", fill="skyblue", colour="blue") + geom_line(colour="red") +  theme(legend.position = "top") +labs(title="Adstock by TV GRP", x ="Week", y = "TV GRP Adstock")
+
+ggplot(data, aes(x=`Week Number`, y=`GRP.Radio.adstock`, group = 1)) + geom_bar(aes(x=`Week Number`, y=`GRP Radio`),stat="identity", fill="tan1", colour="sienna3")+ geom_line(colour="red")+ theme(legend.position = "top") +labs(title="Adstock by RADIO GRP", x ="Week", y = "RADIO GRP Adstock")
+```

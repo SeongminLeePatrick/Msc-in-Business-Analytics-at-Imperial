@@ -1,0 +1,70 @@
+---
+title: "Multiple Regression Analysis: Estimation"
+author: Jiahua Wu
+subtitle: BS1802 Statistics and Econometrics
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+library(ggplot2)
+```
+
+## Example 2.4
+We first load the data set, and check out the data. Within all the data files I uploaded for this course, there will be a list called $desc$, which describes the variables within the data set.
+```{r}
+load("wage1.RData")
+ls()  # show data sets and functions you have defined
+desc
+```
+
+We rename the data frame with a more informative name :)
+```{r}
+wage.data <- data
+```
+
+As the first step for any data analysis, we will need to get familiar with the data set by investigating summary statistics, univariate plot, and pairwise plot. For this example, we focus on the two variables of interest, $wage$ and $educ$.
+```{r}
+summary(wage.data[, 1:2])
+```
+The summary statistics show that there is some discrepancy between median and mean of $wage$, which implies skewness in the distribution. Also from the summary statistics, we notice that $educ$ is highly clustered, with more half of the samples are between 12 and 14. These findings are further confirmed with the histogram plots.
+```{r}
+ggplot(data = wage.data, aes(x = wage)) + geom_histogram()
+ggplot(data = wage.data, aes(x = educ)) + geom_histogram() 
+```
+
+Next, we investigate the scatterplot of $wage$ vs $educ$. It shows that $wage$ generally increases in $educ$. Two things worth mentioning in this plot: (1) we have few observations with less than 5 years of education, which will impact the accuracy of prediction for lower levels of education; (2) the variation in $wage$ generally increases in $educ$. This is a problem called heteroskedasticity in econometrics. We will discuss how to address it later in the course. 
+```{r}
+ggplot(data = wage.data, aes(x = educ, y = wage)) + geom_point()
+```
+
+Next we run regression and check out the output. The interpretation of OLS estimates is being dicussed on page 27 in the slide deck. 
+```{r}
+linear.m1 <- lm(wage ~ educ, data = wage.data)
+summary(linear.m1)
+```
+
+We can also calculate OLS estimates manually, using the matrix form of OLS estimates on page 15. $cbind()$ is a R function that combines columns, and $rep()$ is used to generate a vector of 1.
+```{r}
+# manual calculation of OLS estimates
+X <- cbind(rep(1, nrow(wage.data)), wage.data$educ)
+y <- wage.data$wage
+OLS.est <- solve(t(X) %*% X, t(X) %*% y)
+OLS.est
+```
+
+We can also calculate $R^2$ manually using the formula on page 22.
+```{r}
+# manual calculation of R^2
+y.hat <- linear.m1$fitted.values
+R.sqrd <- sum((y.hat - mean(y.hat))^2) / sum((y - mean(y))^2)
+R.sqrd
+R.sqrd2 <- 1 - sum(linear.m1$residuals^2) / sum((y - mean(y))^2)
+R.sqrd2
+```
+
+Last, let us check out the fit of the OLS regression line by adding it to the scatterplot between $wage$ and $educ$. It seems that the OLS regression line generally underestimates wage with low levels of education ($<5$) and high levels of education ($>15$). The plot suggests a nonlinear pattern between between $wage$ and $educ$, which needs to be accounted for in the regression model.
+```{r}
+ggplot(data = wage.data, aes(x = educ, y = wage)) + geom_point() + stat_smooth(method = "lm")
+```
